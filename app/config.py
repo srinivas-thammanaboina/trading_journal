@@ -22,7 +22,8 @@ class Settings:
     # Auth
     ADMIN_SECRET: str = os.getenv("ADMIN_SECRET", "")
     SESSION_SECRET: str = os.getenv("SESSION_SECRET", "change-me-in-production")
-    PASSWORD_HASH: str = os.getenv("PASSWORD_HASH", "")  # bcrypt hash of login password
+    ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", "test123")
+    PASSWORD_HASH: str = os.getenv("PASSWORD_HASH", "")  # bcrypt hash — auto-generated if ADMIN_PASSWORD is set
     SESSION_EXPIRY_HOURS: int = int(os.getenv("SESSION_EXPIRY_HOURS", "24"))
 
     # Rate limiting
@@ -35,3 +36,10 @@ class Settings:
 
 
 settings = Settings()
+
+# Auto-hash ADMIN_PASSWORD if PASSWORD_HASH is not set
+if not settings.PASSWORD_HASH and settings.ADMIN_PASSWORD:
+    import bcrypt
+    settings.PASSWORD_HASH = bcrypt.hashpw(
+        settings.ADMIN_PASSWORD.encode(), bcrypt.gensalt()
+    ).decode()
