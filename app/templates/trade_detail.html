@@ -1,0 +1,291 @@
+{% extends "base.html" %}
+{% block title %}Trade {{ summary.position_id }} - Trading Journal{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:1rem;">
+    <a href="/trades" style="color:var(--accent); text-decoration:none;">&larr; Back to Trades</a>
+</div>
+
+<div style="display:flex; align-items:center; gap:1rem; margin-bottom:1.5rem;">
+    <h1 class="page-title" style="margin:0;">
+        {{ summary.ticker }} {{ summary.contract or '' }}
+    </h1>
+    {% if summary.is_open %}
+        <span class="badge badge-blue" style="font-size:0.9rem;">OPEN</span>
+    {% elif summary.is_win %}
+        <span class="badge badge-green" style="font-size:0.9rem;">WIN</span>
+    {% else %}
+        <span class="badge badge-red" style="font-size:0.9rem;">LOSS</span>
+    {% endif %}
+</div>
+
+<!-- Summary Cards -->
+<div class="card-grid" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); margin-bottom:1.5rem;">
+    <div class="card">
+        <div class="label">Date</div>
+        <div class="value neutral" style="font-size:1.2rem;">{{ summary.trade_date }}</div>
+    </div>
+    <div class="card">
+        <div class="label">Entry</div>
+        <div class="value neutral" style="font-size:1.2rem;">${{ "%.2f"|format(summary.entry_price or 0) }}</div>
+    </div>
+    <div class="card">
+        <div class="label">Exit</div>
+        <div class="value neutral" style="font-size:1.2rem;">
+            {% if summary.exit_price %}${{ "%.2f"|format(summary.exit_price) }}{% else %}—{% endif %}
+        </div>
+    </div>
+    <div class="card">
+        <div class="label">Qty</div>
+        <div class="value neutral" style="font-size:1.2rem;">{{ summary.contracts }}</div>
+    </div>
+    <div class="card">
+        <div class="label">Realized P&L</div>
+        <div class="value {{ 'positive' if summary.total_pnl > 0 else 'negative' if summary.total_pnl < 0 else 'neutral' }}" style="font-size:1.2rem;">
+            {{ '+' if summary.total_pnl >= 0 }}${{ "%.2f"|format(summary.total_pnl) }}
+        </div>
+    </div>
+    <div class="card">
+        <div class="label">Position ID</div>
+        <div class="value neutral" style="font-size:0.85rem; word-break:break-all;">{{ summary.position_id }}</div>
+    </div>
+</div>
+
+<!-- Two-column layout: Timeline + Details -->
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem;">
+
+    <!-- Left: Order Timeline -->
+    <div>
+        <h2 style="font-size:1.1rem; margin-bottom:1rem; color:var(--text-primary);">Order Timeline</h2>
+        <div class="card" style="padding:0;">
+            {% if timeline %}
+            <div class="timeline">
+                {% for event in timeline %}
+                <div class="timeline-item">
+                    <div class="timeline-dot
+                        {% if event.type == 'alert' %}dot-blue
+                        {% elif event.type == 'parse' %}dot-cyan
+                        {% elif event.type == 'risk_approved' %}dot-green
+                        {% elif event.type == 'risk_rejected' %}dot-red
+                        {% elif event.type == 'order' %}dot-yellow
+                        {% elif event.type in ('fill', 'fill_bot') %}dot-green
+                        {% elif event.type == 'fill_sld' %}dot-orange
+                        {% elif event.type == 'pnl_win' %}dot-green
+                        {% elif event.type == 'pnl_loss' %}dot-red
+                        {% else %}dot-gray
+                        {% endif %}
+                    "></div>
+                    <div class="timeline-content">
+                        <div class="timeline-time">{{ event.time[11:19] if event.time|length > 19 else event.time }}</div>
+                        <div class="timeline-event">{{ event.event }}</div>
+                        <div class="timeline-detail">{{ event.detail }}</div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div style="padding:1.5rem; color:var(--text-secondary); text-align:center;">No timeline events</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Right: Detail Panels -->
+    <div>
+        <!-- Source Alert -->
+        <h2 style="font-size:1.1rem; margin-bottom:1rem; color:var(--text-primary);">Source Alert</h2>
+        <div class="card" style="margin-bottom:1.5rem;">
+            {% if alert %}
+            <div class="detail-grid">
+                <div class="detail-label">Raw Text</div>
+                <div class="detail-value" style="font-family:monospace; font-size:0.85rem; background:var(--bg-primary); padding:0.5rem; border-radius:4px; white-space:pre-wrap;">{{ alert.raw_text }}</div>
+
+                <div class="detail-label">Source</div>
+                <div class="detail-value">
+                    <span class="badge {{ 'badge-blue' if alert.source == 'telegram' else 'badge-purple' }}">{{ alert.source }}</span>
+                </div>
+
+                <div class="detail-label">Parse Result</div>
+                <div class="detail-value">{{ alert.parse_result or '—' }}</div>
+
+                <div class="detail-label">Parsed Action</div>
+                <div class="detail-value">{{ alert.action or '—' }} {{ alert.ticker or '' }} {{ alert.strike or '' }} {{ alert.right or '' }}</div>
+
+                <div class="detail-label">Signal Price</div>
+                <div class="detail-value">${{ "%.2f"|format(alert.entry_price or 0) }}</div>
+
+                <div class="detail-label">Signal Stop</div>
+                <div class="detail-value">${{ "%.2f"|format(alert.stop_price or 0) }}</div>
+
+                <div class="detail-label">Risk Decision</div>
+                <div class="detail-value">
+                    {% if alert.risk_result == 'approved' %}
+                        <span class="badge badge-green">Approved</span>
+                    {% elif alert.risk_result %}
+                        <span class="badge badge-red">{{ alert.risk_result }}</span> {{ alert.risk_reason or '' }}
+                    {% else %}
+                        —
+                    {% endif %}
+                </div>
+
+                <div class="detail-label">Outcome</div>
+                <div class="detail-value">
+                    <span class="badge {{ 'badge-green' if alert.outcome == 'filled' else 'badge-red' if alert.outcome == 'rejected' else 'badge-yellow' }}">
+                        {{ alert.outcome }}
+                    </span>
+                </div>
+            </div>
+            {% else %}
+            <div style="color:var(--text-secondary);">No linked alert found</div>
+            {% endif %}
+        </div>
+
+        <!-- Guru Signal -->
+        <h2 style="font-size:1.1rem; margin-bottom:1rem; color:var(--text-primary);">Guru Signal</h2>
+        <div class="card" style="margin-bottom:1.5rem;">
+            {% if guru_signal %}
+            <div class="detail-grid">
+                <div class="detail-label">Raw Text</div>
+                <div class="detail-value" style="font-family:monospace; font-size:0.85rem; background:var(--bg-primary); padding:0.5rem; border-radius:4px;">{{ guru_signal.raw_text }}</div>
+
+                <div class="detail-label">Source</div>
+                <div class="detail-value">
+                    <span class="badge {{ 'badge-blue' if guru_signal.source == 'telegram' else 'badge-purple' }}">{{ guru_signal.source }}</span>
+                </div>
+
+                <div class="detail-label">Guru Entry</div>
+                <div class="detail-value">${{ "%.2f"|format(guru_signal.entry_price or 0) }}</div>
+
+                <div class="detail-label">Guru Stop</div>
+                <div class="detail-value">${{ "%.2f"|format(guru_signal.stop_price or 0) }}</div>
+
+                {% if guru_signal.exit_price %}
+                <div class="detail-label">Guru Exit</div>
+                <div class="detail-value">${{ "%.2f"|format(guru_signal.exit_price) }}</div>
+                {% endif %}
+
+                <div class="detail-label">We Executed</div>
+                <div class="detail-value">
+                    {% if guru_signal.we_executed %}
+                        <span class="badge badge-green">Yes</span>
+                    {% else %}
+                        <span class="badge badge-red">No</span> {{ guru_signal.our_reject_reason or '' }}
+                    {% endif %}
+                </div>
+            </div>
+            {% else %}
+            <div style="color:var(--text-secondary);">No linked guru signal found</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Executions Table -->
+<h2 style="font-size:1.1rem; margin:1.5rem 0 1rem; color:var(--text-primary);">Fill Details</h2>
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Side</th>
+                <th>Contracts</th>
+                <th>Fill Price</th>
+                <th>Commission</th>
+                <th>Execution ID</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for e in executions %}
+            <tr>
+                <td>{{ e.execution_time[11:19] if e.execution_time and e.execution_time|length > 19 else e.execution_time or '—' }}</td>
+                <td>
+                    <span class="badge {{ 'badge-green' if e.side == 'BOT' else 'badge-red' }}">{{ e.side }}</span>
+                </td>
+                <td>{{ e.contracts }}</td>
+                <td>${{ "%.2f"|format(e.fill_price or 0) }}</td>
+                <td>{{ '$%.2f'|format(e.commission) if e.commission else '—' }}</td>
+                <td style="font-family:monospace; font-size:0.8rem; color:var(--text-secondary);">{{ e.execution_id or '—' }}</td>
+            </tr>
+            {% endfor %}
+            {% if not executions %}
+            <tr><td colspan="6" style="text-align:center; color:var(--text-secondary);">No executions</td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Orders Table -->
+{% if orders %}
+<h2 style="font-size:1.1rem; margin:1.5rem 0 1rem; color:var(--text-primary);">Order History</h2>
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Action</th>
+                <th>Type</th>
+                <th>Purpose</th>
+                <th>Contracts</th>
+                <th>Limit</th>
+                <th>Fill</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for o in orders %}
+            <tr>
+                <td>{{ o.order_time[11:19] if o.order_time and o.order_time|length > 19 else o.order_time or '—' }}</td>
+                <td>
+                    <span class="badge {{ 'badge-green' if o.order_action == 'BUY' else 'badge-red' }}">{{ o.order_action }}</span>
+                </td>
+                <td>{{ o.order_type or '—' }}</td>
+                <td>{{ o.order_purpose or '—' }}</td>
+                <td>{{ o.contracts }}</td>
+                <td>{{ '$%.2f'|format(o.limit_price) if o.limit_price else '—' }}</td>
+                <td>{{ '$%.2f'|format(o.fill_price) if o.fill_price else '—' }}</td>
+                <td>
+                    <span class="badge {{ 'badge-green' if o.status == 'Filled' else 'badge-yellow' if o.status == 'Submitted' else 'badge-red' }}">
+                        {{ o.status or '—' }}
+                    </span>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- P&L Events -->
+{% if pnl_events %}
+<h2 style="font-size:1.1rem; margin:1.5rem 0 1rem; color:var(--text-primary);">Realized P&L Events</h2>
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Type</th>
+                <th>Contracts</th>
+                <th>Entry</th>
+                <th>Exit</th>
+                <th>P&L</th>
+                <th>Cumulative Daily</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in pnl_events %}
+            <tr>
+                <td>{{ p.event_time[11:19] if p.event_time and p.event_time|length > 19 else p.event_time or '—' }}</td>
+                <td><span class="badge badge-yellow">{{ p.event_type }}</span></td>
+                <td>{{ p.contracts_closed }}</td>
+                <td>${{ "%.2f"|format(p.entry_price or 0) }}</td>
+                <td>${{ "%.2f"|format(p.exit_price or 0) }}</td>
+                <td class="{{ 'pnl-positive' if p.realized_pnl > 0 else 'pnl-negative' if p.realized_pnl < 0 else '' }}">
+                    {{ '+' if p.realized_pnl >= 0 }}${{ "%.2f"|format(p.realized_pnl) }}
+                </td>
+                <td>${{ "%.2f"|format(p.cumulative_daily_pnl or 0) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}

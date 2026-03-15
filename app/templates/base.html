@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Trading Journal{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/style.css?v=3">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <div class="layout">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-logo">
+                <div class="logo-text">SPX<br>Journal</div>
+                <div class="logo-sub">Bot / Performance OS</div>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="/dashboard" class="nav-item {{ 'active' if active_page == 'dashboard' }}">Overview</a>
+                <a href="/trades" class="nav-item {{ 'active' if active_page == 'trades' }}">Trades</a>
+                <a href="/alerts" class="nav-item {{ 'active' if active_page == 'alerts' }}">Alert Pipeline</a>
+                <a href="/analytics" class="nav-item {{ 'active' if active_page == 'analytics' }}">Analytics</a>
+                <a href="/guru" class="nav-item {{ 'active' if active_page == 'guru' }}">Guru Board</a>
+                <a href="/health" class="nav-item {{ 'active' if active_page == 'health' }}">Risk & Health</a>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="mode-badge">PAPER MODE</div>
+                <a href="/logout" class="logout-link">Logout</a>
+            </div>
+        </aside>
+
+        <!-- Main content -->
+        <main class="main-content">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    <script src="/static/js/charts.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

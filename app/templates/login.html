@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - SPX Journal</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="login-wrap">
+        <div class="login-box">
+            <h1>SPX Journal</h1>
+            <div class="login-sub">Bot / Performance OS</div>
+            {% if error %}
+            <div class="login-error">{{ error }}</div>
+            {% endif %}
+            <form method="POST" action="/login">
+                <input type="password" name="password" placeholder="Password" autofocus required>
+                <button type="submit">Secure Login</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+{% block title %}Analytics - Trading Journal{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">Analytics</h1>
+    <p class="page-subtitle">Profit factor, expectancy, drawdown, and average hold time</p>
+</div>
+
+<!-- Summary cards -->
+<div class="card-grid" style="grid-template-columns: repeat(5, 1fr);">
+    <div class="card">
+        <div class="label">Total P&L</div>
+        <div class="value {{ 'positive' if stats.overall.total_pnl >= 0 else 'negative' }}">
+            {{ '+' if stats.overall.total_pnl >= 0 }}${{ "%.0f"|format(stats.overall.total_pnl) }}
+        </div>
+        <div class="sub muted">net realized</div>
+    </div>
+    <div class="card">
+        <div class="label">Win Rate</div>
+        <div class="value neutral">{{ "%.1f"|format(stats.overall.win_rate) }}%</div>
+        <div class="sub muted">{{ stats.overall.wins }} wins / {{ stats.overall.losses }} losses</div>
+    </div>
+    <div class="card">
+        <div class="label">Expectancy</div>
+        <div class="value {{ 'positive' if stats.overall.expectancy >= 0 else 'negative' }}">
+            {{ '+' if stats.overall.expectancy >= 0 }}${{ "%.0f"|format(stats.overall.expectancy) }}
+        </div>
+        <div class="sub muted">per trade</div>
+    </div>
+    <div class="card">
+        <div class="label">Profit Factor</div>
+        <div class="value {{ 'positive' if stats.overall.profit_factor >= 1.5 else 'neutral' }}">
+            {{ "%.2f"|format(stats.overall.profit_factor) }}
+        </div>
+        <div class="sub muted">gross wins / losses</div>
+    </div>
+    <div class="card">
+        <div class="label">Max DD</div>
+        <div class="value negative">
+            -{{ "%.1f"|format(stats.overall.max_dd_pct) }}%
+        </div>
+        <div class="sub muted">from peak</div>
+    </div>
+</div>
+
+<!-- Charts row 1: Cumulative P&L + Win/Loss donut -->
+<div class="chart-row">
+    <div class="chart-container" style="height:300px;">
+        <div class="chart-title">Cumulative P&L</div>
+        <div class="chart-sub">All-time performance</div>
+        <canvas id="pnlChart"></canvas>
+    </div>
+    <div class="chart-container" style="height:300px;">
+        <div class="chart-title">Win / Loss</div>
+        <div class="chart-sub">Plus breakeven mix</div>
+        <canvas id="winLossChart"></canvas>
+    </div>
+</div>
+
+<!-- Charts row 2: Daily P&L bars + Deeper Metrics -->
+<div class="chart-row">
+    <div class="chart-container" style="height:280px;">
+        <div class="chart-title">Daily P&L</div>
+        <div class="chart-sub">Bar chart by trading day</div>
+        <canvas id="dailyBars"></canvas>
+    </div>
+    <div class="table-wrap">
+        <div class="table-header">Deeper Metrics</div>
+        <table>
+            <thead><tr><th>Metric</th><th style="text-align:right;">Value</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td style="font-family:inherit;">Avg win</td>
+                    <td style="text-align:right;" class="pnl-positive">+${{ "%.0f"|format(stats.overall.avg_win) }}</td>
+                </tr>
+                <tr>
+                    <td style="font-family:inherit;">Avg loss</td>
+                    <td style="text-align:right;" class="pnl-negative">${{ "%.0f"|format(stats.overall.avg_loss) }}</td>
+                </tr>
+                <tr>
+                    <td style="font-family:inherit;">Best trade</td>
+                    <td style="text-align:right;" class="pnl-positive">+${{ "%.0f"|format(stats.overall.best_trade) }}</td>
+                </tr>
+                <tr>
+                    <td style="font-family:inherit;">Worst trade</td>
+                    <td style="text-align:right;" class="pnl-negative">${{ "%.0f"|format(stats.overall.worst_trade) }}</td>
+                </tr>
+                <tr>
+                    <td style="font-family:inherit;">Breakeven rate</td>
+                    <td style="text-align:right;">{{ "%.0f"|format(stats.overall.breakeven_rate) }}%</td>
+                </tr>
+                <tr>
+                    <td style="font-family:inherit;">Total trades</td>
+                    <td style="text-align:right;">{{ stats.overall.total }}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Per-ticker breakdown -->
+{% if stats.by_ticker %}
+<h2 class="section-title">By Ticker</h2>
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Ticker</th>
+                <th>Trades</th>
+                <th>Wins</th>
+                <th>Losses</th>
+                <th>Win Rate</th>
+                <th>Total P&L</th>
+                <th>Avg Win</th>
+                <th>Avg Loss</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ticker, s in stats.by_ticker.items() %}
+            <tr>
+                <td><strong>{{ ticker }}</strong></td>
+                <td>{{ s.total }}</td>
+                <td>{{ s.wins }}</td>
+                <td>{{ s.losses }}</td>
+                <td>{{ "%.1f"|format(s.win_rate) }}%</td>
+                <td class="{{ 'pnl-positive' if s.total_pnl > 0 else 'pnl-negative' if s.total_pnl < 0 else 'pnl-zero' }}">
+                    {{ '+' if s.total_pnl >= 0 }}${{ "%.2f"|format(s.total_pnl) }}
+                </td>
+                <td class="pnl-positive">${{ "%.2f"|format(s.avg_win) }}</td>
+                <td class="pnl-negative">${{ "%.2f"|format(s.avg_loss) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- Trade Calendar -->
+<h2 class="section-title" style="margin-top:2rem;">Trade Calendar</h2>
+<div class="card" style="padding:1.25rem;">
+    <!-- Calendar navigation + monthly total -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+        <div style="display:flex; align-items:center; gap:0.5rem;">
+            {% set prev_month = cal_month - 1 if cal_month > 1 else 12 %}
+            {% set prev_year = cal_year if cal_month > 1 else cal_year - 1 %}
+            {% set next_month = cal_month + 1 if cal_month < 12 else 1 %}
+            {% set next_year = cal_year if cal_month < 12 else cal_year + 1 %}
+            <a href="/analytics?cal_year={{ prev_year }}&cal_month={{ prev_month }}" style="color:var(--text-secondary); text-decoration:none; padding:0.25rem 0.5rem; font-size:1.1rem;">&lsaquo;</a>
+            <span style="font-weight:600; font-size:1rem; min-width:140px; text-align:center;">{{ cal_month_name }} {{ cal_year }}</span>
+            <a href="/analytics?cal_year={{ next_year }}&cal_month={{ next_month }}" style="color:var(--text-secondary); text-decoration:none; padding:0.25rem 0.5rem; font-size:1.1rem;">&rsaquo;</a>
+        </div>
+        <div style="display:flex; align-items:center; gap:1.5rem;">
+            <div style="text-align:right;">
+                <span style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.04em;">Monthly Total</span><br>
+                <span style="font-family:var(--font-mono); font-weight:700; font-size:1.1rem;" class="{{ 'pnl-positive' if month_total_pnl >= 0 else 'pnl-negative' }}">
+                    {{ '+' if month_total_pnl >= 0 }}${{ "%.0f"|format(month_total_pnl) }}
+                </span>
+                <span style="font-size:0.7rem; color:var(--text-muted);">({{ month_total_trades }} trades)</span>
+            </div>
+            <a href="/analytics" style="color:var(--accent); text-decoration:none; font-size:0.82rem; padding:0.3rem 0.75rem; border:1px solid var(--border); border-radius:6px;">Today</a>
+        </div>
+    </div>
+
+    <!-- Calendar grid: 8 columns (7 days + weekly summary) -->
+    <div class="cal-grid-weekly">
+        <div class="cal-header">Sun</div>
+        <div class="cal-header">Mon</div>
+        <div class="cal-header">Tue</div>
+        <div class="cal-header">Wed</div>
+        <div class="cal-header">Thu</div>
+        <div class="cal-header">Fri</div>
+        <div class="cal-header">Sat</div>
+        <div class="cal-header" style="color:var(--accent);">Week</div>
+
+        {% set ns = namespace(week_pnl=0.0, week_trades=0, col=0) %}
+
+        <!-- Empty cells before first day -->
+        {% for _ in range(first_weekday_sun) %}
+        <div class="cal-cell cal-empty"></div>
+        {% set ns.col = ns.col + 1 %}
+        {% endfor %}
+
+        <!-- Day cells -->
+        {% for day in range(1, days_in_month + 1) %}
+        {% set date_str = "%04d-%02d-%02d"|format(cal_year, cal_month, day) %}
+        {% set day_data = calendar_data.get(date_str) %}
+        {% set is_today = date_str == today_str %}
+
+        {% if day_data %}
+            {% set ns.week_pnl = ns.week_pnl + day_data.pnl %}
+            {% set ns.week_trades = ns.week_trades + day_data.trades %}
+        {% endif %}
+
+        <div class="cal-cell {% if day_data %}{{ 'cal-win' if day_data.pnl > 0 else 'cal-loss' }}{% endif %} {% if is_today %}cal-today{% endif %}">
+            <div class="cal-day {% if is_today %}cal-day-today{% endif %}">{{ day }}</div>
+            {% if day_data %}
+            <div class="cal-pnl {{ 'pnl-positive' if day_data.pnl > 0 else 'pnl-negative' }}">
+                {{ '+' if day_data.pnl > 0 }}${{ "%.1f"|format(day_data.pnl) }}
+            </div>
+            <div class="cal-trades">{{ day_data.trades }} trade{{ 's' if day_data.trades != 1 }}</div>
+            {% endif %}
+        </div>
+        {% set ns.col = ns.col + 1 %}
+
+        <!-- End of week (Saturday) or end of month: add weekly summary -->
+        {% if ns.col == 7 or day == days_in_month %}
+            <!-- Pad remaining cells if end of month mid-week -->
+            {% if day == days_in_month and ns.col < 7 %}
+                {% for _ in range(7 - ns.col) %}
+                <div class="cal-cell cal-empty"></div>
+                {% endfor %}
+            {% endif %}
+
+            <!-- Weekly summary cell -->
+            <div class="cal-cell cal-week-summary">
+                {% if ns.week_trades > 0 %}
+                <div class="cal-pnl {{ 'pnl-positive' if ns.week_pnl > 0 else 'pnl-negative' }}" style="font-size:0.85rem;">
+                    {{ '+' if ns.week_pnl > 0 }}${{ "%.0f"|format(ns.week_pnl) }}
+                </div>
+                <div class="cal-trades">{{ ns.week_trades }} trade{{ 's' if ns.week_trades != 1 }}</div>
+                {% endif %}
+            </div>
+
+            {% set ns.week_pnl = 0.0 %}
+            {% set ns.week_trades = 0 %}
+            {% set ns.col = 0 %}
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const pnlData = {{ daily_pnl | tojson }};
+    const statsData = {{ stats.overall | tojson }};
+
+    if (pnlData.length > 0) {
+        createPnlChart('pnlChart', pnlData);
+        createDailyBars('dailyBars', pnlData);
+    }
+    createWinLossDonut('winLossChart', statsData);
+</script>
+{% endblock %}

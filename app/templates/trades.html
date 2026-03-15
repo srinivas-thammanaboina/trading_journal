@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}Trades - Trading Journal{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">Trade History</h1>
+    <p class="page-subtitle">Journal now adds source, hold time, tags, and a drilldown summary</p>
+</div>
+
+<div class="filters">
+    <form method="GET" action="/trades" style="display:flex; gap:0.75rem; flex-wrap:wrap;">
+        <input type="date" name="date" value="{{ filter_date or '' }}" placeholder="Date">
+        <input type="text" name="ticker" value="{{ filter_ticker or '' }}" placeholder="Ticker" style="width:80px;">
+        <button type="submit">Filter</button>
+        <a href="/trades" class="clear-link">Clear</a>
+    </form>
+</div>
+
+{% if pnl_events %}
+<div class="card-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom:1rem;">
+    <div class="card">
+        <div class="label">Total P&L</div>
+        <div class="value {{ 'positive' if total_pnl >= 0 else 'negative' }}">
+            {{ '+' if total_pnl >= 0 }}${{ "%.2f"|format(total_pnl) }}
+        </div>
+        <div class="sub muted">expectancy {{ '+' if expectancy >= 0 }}${{ "%.0f"|format(expectancy) }}/trade</div>
+    </div>
+    <div class="card">
+        <div class="label">Trades</div>
+        <div class="value neutral">{{ pnl_events|length }}</div>
+    </div>
+    <div class="card">
+        <div class="label">Win Rate</div>
+        <div class="value neutral">{{ "%.0f"|format(win_rate) }}%</div>
+        <div class="sub muted">profit factor {{ "%.2f"|format(profit_factor) }}</div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Two-column: Trades Table + Snapshot Panel -->
+<div style="display:grid; grid-template-columns:3fr 2fr; gap:1rem; align-items:start;">
+
+    <!-- Trades Table -->
+    <div class="table-wrap">
+        <div class="table-header">Trades Table <span class="table-sub">click row for snapshot, double-click for full detail</span></div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Time</th>
+                    <th>Type</th>
+                    <th>Contract</th>
+                    <th>Entry</th>
+                    <th>Exit</th>
+                    <th>P&L</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for e in pnl_events %}
+                <tr class="clickable-row snapshot-row"
+                    data-position-id="{{ e.position_id }}"
+                    data-ticker="{{ e.ticker }}"
+                    data-contract="{{ e.contract_symbol }}"
+                    data-type="{{ e.event_type }}"
+                    data-entry="{{ '%.2f'|format(e.entry_price) }}"
+                    data-exit="{{ '%.2f'|format(e.exit_price) }}"
+                    data-qty="{{ e.contracts_closed }}"
+                    data-pnl="{{ '%.2f'|format(e.realized_pnl) }}"
+                    data-date="{{ e.trade_date }}"
+                    data-time="{{ e.event_time[11:19] if e.event_time and e.event_time|length > 19 else e.event_time or '' }}"
+                    onclick="showSnapshot(this)"
+                    ondblclick="window.location='/trade/{{ e.position_id }}'">
+                    <td>{{ e.trade_date }}</td>
+                    <td>{{ e.event_time[11:16] if e.event_time and e.event_time|length > 16 else e.event_time }}</td>
+                    <td>
+                        <span class="badge {{ 'badge-red' if 'CLOSE' in e.event_type else 'badge-yellow' }}">
+                            {{ e.event_type }}
+                        </span>
+                    </td>
+                    <td><strong>{{ e.ticker }}</strong> {{ e.contract_symbol }}</td>
+                    <td>${{ "%.2f"|format(e.entry_price) }}</td>
+                    <td>${{ "%.2f"|format(e.exit_price) }}</td>
+                    <td class="{{ 'pnl-positive' if e.realized_pnl > 0 else 'pnl-negative' if e.realized_pnl < 0 else 'pnl-zero' }}">
+                        {{ '+' if e.realized_pnl >= 0 }}${{ "%.2f"|format(e.realized_pnl) }}
+                    </td>
+                </tr>
+                {% endfor %}
+                {% if not pnl_events %}
+                <tr><td colspan="7" style="text-align:center; color:var(--text-secondary); padding:2rem;">No trades found</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Trade Snapshot Panel -->
+    <div class="card" id="snapshotPanel" style="position:sticky; top:2rem;">
+        <div id="snapshotEmpty" style="text-align:center; color:var(--text-secondary); padding:2rem;">
+            <div style="font-size:1.5rem; margin-bottom:0.5rem; opacity:0.3;">&#9432;</div>
+            Click a trade row to preview
+        </div>
+        <div id="snapshotContent" style="display:none;">
+            <div style="font-size:1.1rem; font-weight:700; margin-bottom:0.25rem;">Trade Snapshot</div>
+            <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:1.25rem;">Selected trade</div>
+
+            <div class="detail-grid" style="gap:0.6rem 1rem;">
+                <div class="detail-label">Contract</div>
+                <div class="detail-value" id="snap-contract" style="font-weight:600;"></div>
+
+                <div class="detail-label">Date</div>
+                <div class="detail-value" id="snap-date"></div>
+
+                <div class="detail-label">Type</div>
+                <div class="detail-value" id="snap-type"></div>
+
+                <div class="detail-label">Entry</div>
+                <div class="detail-value" id="snap-entry"></div>
+
+                <div class="detail-label">Exit</div>
+                <div class="detail-value" id="snap-exit"></div>
+
+                <div class="detail-label">Qty</div>
+                <div class="detail-value" id="snap-qty"></div>
+
+                <div class="detail-label">P&L</div>
+                <div class="detail-value" id="snap-pnl" style="font-weight:700; font-family:var(--font-mono);"></div>
+
+                <div class="detail-label">R Multiple</div>
+                <div class="detail-value" id="snap-rmult" style="font-family:var(--font-mono);"></div>
+            </div>
+
+            <div style="margin-top:1.5rem; padding-top:1rem; border-top:1px solid var(--border);">
+                <a id="snap-detail-link" href="#" style="color:var(--accent); text-decoration:none; font-size:0.85rem; font-weight:500;">
+                    View full trade detail &rarr;
+                </a>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function showSnapshot(row) {
+    // Remove highlight from all rows
+    document.querySelectorAll('.snapshot-row').forEach(r => r.classList.remove('snapshot-active'));
+    row.classList.add('snapshot-active');
+
+    document.getElementById('snapshotEmpty').style.display = 'none';
+    document.getElementById('snapshotContent').style.display = 'block';
+
+    const ticker = row.dataset.ticker;
+    const contract = row.dataset.contract;
+    const entry = parseFloat(row.dataset.entry);
+    const exit = parseFloat(row.dataset.exit);
+    const pnl = parseFloat(row.dataset.pnl);
+    const qty = parseInt(row.dataset.qty);
+
+    document.getElementById('snap-contract').textContent = contract;
+    document.getElementById('snap-date').textContent = row.dataset.date + ' ' + row.dataset.time;
+    document.getElementById('snap-type').textContent = row.dataset.type;
+    document.getElementById('snap-entry').textContent = '$' + entry.toFixed(2);
+    document.getElementById('snap-exit').textContent = '$' + exit.toFixed(2);
+    document.getElementById('snap-qty').textContent = qty;
+
+    const pnlEl = document.getElementById('snap-pnl');
+    pnlEl.textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
+    pnlEl.style.color = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--text-secondary)';
+
+    // R multiple: pnl per contract / risk per contract (entry - stop ≈ entry * 0.5 as rough estimate)
+    const riskPerContract = entry * 100;  // cost of one contract
+    const pnlPerContract = (exit - entry) * 100;
+    const rMult = riskPerContract > 0 ? (pnlPerContract / riskPerContract).toFixed(1) : '—';
+    const rmultEl = document.getElementById('snap-rmult');
+    rmultEl.textContent = (parseFloat(rMult) >= 0 ? '+' : '') + rMult + 'R';
+    rmultEl.style.color = parseFloat(rMult) > 0 ? 'var(--green)' : parseFloat(rMult) < 0 ? 'var(--red)' : 'var(--text-secondary)';
+
+    document.getElementById('snap-detail-link').href = '/trade/' + row.dataset.positionId;
+}
+</script>
+<style>
+.snapshot-active {
+    background: rgba(88, 166, 255, 0.08) !important;
+    border-left: 3px solid var(--accent);
+}
+</style>
+{% endblock %}

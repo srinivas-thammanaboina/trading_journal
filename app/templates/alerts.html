@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% block title %}Alert Pipeline - Trading Journal{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">Alert &rarr; Parse &rarr; Risk &rarr; Fill</h1>
+    <p class="page-subtitle">Pipeline observability — separates parse quality, risk outcome, and broker outcome</p>
+</div>
+
+<!-- Filters -->
+<div class="filters" style="margin-bottom:1.25rem;">
+    <form method="GET" action="/alerts" style="display:flex; gap:0.75rem; align-items:center;">
+        <input type="date" name="date" value="{{ filter_date or '' }}">
+        <select name="outcome">
+            <option value="">All outcomes</option>
+            <option value="filled" {{ 'selected' if filter_outcome == 'filled' }}>Filled</option>
+            <option value="rejected" {{ 'selected' if filter_outcome == 'rejected' }}>Rejected</option>
+            <option value="ignored" {{ 'selected' if filter_outcome == 'ignored' }}>Ignored</option>
+            <option value="duplicate" {{ 'selected' if filter_outcome == 'duplicate' }}>Duplicate</option>
+            <option value="parse_error" {{ 'selected' if filter_outcome == 'parse_error' }}>Parse error</option>
+        </select>
+        <button type="submit">Filter</button>
+        <a href="/alerts" class="clear-link">Clear</a>
+    </form>
+</div>
+
+<!-- Pipeline throughput summary -->
+<div class="card" style="margin-bottom:1.5rem; padding:1rem 1.25rem;">
+    <div style="font-weight:600; margin-bottom:0.25rem;">Pipeline Throughput</div>
+    <div style="font-size:0.85rem; color:var(--text-secondary);">
+        Today: {{ pipeline.total }} alerts &rarr; {{ pipeline.parsed }} parsed &rarr; {{ pipeline.approved }} approved &rarr; {{ pipeline.filled }} filled
+    </div>
+</div>
+
+<!-- Pipeline funnel cards -->
+<div class="pipeline">
+    <div class="pipeline-step">
+        <div class="label">Alert In</div>
+        <div class="value">{{ pipeline.total }}</div>
+        <div class="sub muted">all sources</div>
+    </div>
+    <div class="pipeline-arrow">&rsaquo;</div>
+    <div class="pipeline-step">
+        <div class="label">Parsed</div>
+        <div class="value {{ 'positive' if pipeline.parse_rate >= 80 else '' }}">{{ pipeline.parsed }}</div>
+        <div class="sub {{ 'positive' if pipeline.parse_rate >= 80 else 'negative' }}">{{ "%.0f"|format(pipeline.parse_rate) }}% success</div>
+    </div>
+    <div class="pipeline-arrow">&rsaquo;</div>
+    <div class="pipeline-step">
+        <div class="label">Risk Approved</div>
+        <div class="value">{{ pipeline.approved }}</div>
+        <div class="sub {{ 'negative' if pipeline.rejected > 0 else 'muted' }}">{{ pipeline.rejected }} rejected</div>
+    </div>
+    <div class="pipeline-arrow">&rsaquo;</div>
+    <div class="pipeline-step">
+        <div class="label">Filled</div>
+        <div class="value {{ 'positive' if pipeline.fill_rate >= 80 else '' }}">{{ pipeline.filled }}</div>
+        <div class="sub {{ 'positive' if pipeline.fill_rate >= 80 else 'negative' }}">{{ "%.0f"|format(pipeline.fill_rate) }}% fill rate</div>
+    </div>
+</div>
+
+<!-- Three diagnostic blocks -->
+<div class="three-col">
+    <!-- Parse Quality -->
+    <div class="table-wrap">
+        <div class="table-header">Parse Quality <span class="table-sub">classification breakdown</span></div>
+        <table>
+            <thead><tr><th>Metric</th><th style="text-align:right;">Count</th></tr></thead>
+            <tbody>
+                {% for label, count in parse_quality %}
+                <tr>
+                    <td style="font-family:inherit;">{{ label }}</td>
+                    <td style="text-align:right;">{{ count }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Risk Outcome -->
+    <div class="table-wrap">
+        <div class="table-header">Risk Outcome <span class="table-sub">gate decisions</span></div>
+        <table>
+            <thead><tr><th>Reason</th><th style="text-align:right;">Count</th></tr></thead>
+            <tbody>
+                {% for label, count in risk_outcome %}
+                <tr>
+                    <td style="font-family:inherit;">
+                        {% if label == 'Approved' %}
+                            <span style="color:var(--green);">{{ label }}</span>
+                        {% else %}
+                            {{ label }}
+                        {% endif %}
+                    </td>
+                    <td style="text-align:right;">{{ count }}</td>
+                </tr>
+                {% endfor %}
+                {% if not risk_outcome %}
+                <tr><td colspan="2" style="text-align:center; color:var(--text-secondary);">No data</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Broker Outcome -->
+    <div class="table-wrap">
+        <div class="table-header">Broker Outcome <span class="table-sub">final status</span></div>
+        <table>
+            <thead><tr><th>Status</th><th style="text-align:right;">Count</th></tr></thead>
+            <tbody>
+                {% for label, count in broker_outcome %}
+                <tr>
+                    <td style="font-family:inherit;">
+                        {% if label == 'Filled' %}<span style="color:var(--green);">{{ label }}</span>
+                        {% elif label == 'Rejected' %}<span style="color:var(--red);">{{ label }}</span>
+                        {% else %}{{ label }}{% endif %}
+                    </td>
+                    <td style="text-align:right;">{{ count }}</td>
+                </tr>
+                {% endfor %}
+                {% if not broker_outcome %}
+                <tr><td colspan="2" style="text-align:center; color:var(--text-secondary);">No data</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- System Notes -->
+<div style="margin-bottom:1.5rem;">
+    <div class="card">
+        <div style="font-weight:600; margin-bottom:0.25rem;">System Notes</div>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:1rem;">Operational interpretation</div>
+        {% if notes %}
+        <ul style="list-style:none; padding:0; margin:0;">
+            {% for note in notes %}
+            <li style="padding:0.35rem 0; font-size:0.85rem; color:var(--text-secondary); line-height:1.5;">
+                &bull; {{ note }}
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <div style="color:var(--text-muted); font-size:0.85rem;">No alerts to analyze</div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Full-width Recent Alert Audit -->
+<div class="table-wrap">
+    <div class="table-header">Recent Alert Audit <span class="table-sub">raw text &rarr; parsed payload &rarr; result</span></div>
+    <table>
+        <thead>
+            <tr>
+                <th style="width:70px;">Time</th>
+                <th style="width:70px;">Src</th>
+                <th>Raw Text</th>
+                <th style="width:200px;">Parsed</th>
+                <th style="width:80px;">Result</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for a in alerts %}
+            <tr>
+                <td style="white-space:nowrap;">{{ a.alert_time[11:19] if a.alert_time and a.alert_time|length > 19 else '' }}</td>
+                <td>
+                    <span class="badge {{ 'badge-blue' if a.source == 'telegram' else 'badge-purple' }}">{{ a.source }}</span>
+                </td>
+                <td style="font-size:0.78rem; color:var(--text-secondary); line-height:1.4;">
+                    <div style="font-family:var(--font-mono); background:var(--bg-primary); padding:0.35rem 0.5rem; border-radius:4px; white-space:pre-wrap; word-break:break-word;">{{ a.raw_text }}</div>
+                </td>
+                <td style="white-space:nowrap;">
+                    {% if a.ticker %}
+                    <span class="badge {{ 'badge-green' if a.action == 'BUY' else 'badge-red' if a.action in ('CLOSE','SELL','PARTIAL_CLOSE') else 'badge-yellow' }}">{{ a.action }}</span>
+                    <strong>{{ a.ticker }}</strong>
+                    {% if a.strike %}{{ a.strike|int }}{{ a.right or '' }}{% endif %}
+                    {% if a.entry_price %}<br><span style="color:var(--text-muted); font-size:0.75rem;">@ ${{ "%.2f"|format(a.entry_price) }}{% if a.stop_price %} / stop ${{ "%.2f"|format(a.stop_price) }}{% endif %}</span>{% endif %}
+                    {% else %}<span style="color:var(--text-muted);">—</span>{% endif %}
+                </td>
+                <td>
+                    {% if a.outcome == 'filled' %}<span class="badge badge-green">filled</span>
+                    {% elif a.outcome == 'rejected' %}<span class="badge badge-red">rejected</span>
+                    {% elif a.outcome == 'duplicate' %}<span class="badge badge-yellow">dup</span>
+                    {% elif a.outcome == 'ignored' %}<span class="badge badge-muted">ignored</span>
+                    {% elif a.outcome == 'parse_error' %}<span class="badge badge-red">parse err</span>
+                    {% else %}<span class="badge badge-muted">{{ a.outcome or '?' }}</span>{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+            {% if not alerts %}
+            <tr><td colspan="5" style="text-align:center; color:var(--text-secondary); padding:2rem;">No alerts for this date</td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

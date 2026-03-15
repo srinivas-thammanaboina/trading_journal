@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Overview - Trading Journal{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">Trading Journal Overview</h1>
+    <p class="page-subtitle">Live system truth, open position monitor, and drilldowns</p>
+</div>
+
+<!-- Summary cards -->
+<div class="card-grid" style="grid-template-columns: repeat(5, 1fr);">
+    <div class="card">
+        <div class="label">Today Net P&L</div>
+        <div class="value {{ 'positive' if health.daily_realized_pnl >= 0 else 'negative' }}">
+            {{ '+' if health.daily_realized_pnl >= 0 }}${{ "%.0f"|format(health.daily_realized_pnl) }}
+        </div>
+        <div class="sub {{ 'positive' if health.daily_unrealized_pnl >= 0 else 'negative' }}">
+            {{ '+' if health.daily_unrealized_pnl >= 0 }}${{ "%.0f"|format(health.daily_unrealized_pnl) }} unrealized
+        </div>
+    </div>
+    <div class="card">
+        <div class="label">Win Rate</div>
+        <div class="value neutral">{{ "%.0f"|format(stats.win_rate) }}%</div>
+        <div class="sub muted">{{ stats.wins }} wins / {{ stats.losses }} losses</div>
+    </div>
+    <div class="card">
+        <div class="label">Alerts Processed</div>
+        <div class="value neutral">{{ alert_count }}</div>
+        <div class="sub muted">{{ acted_count }} acted &middot; {{ rejected_count }} rejected</div>
+    </div>
+    <div class="card">
+        <div class="label">Open Positions</div>
+        <div class="value {{ 'negative' if health.halted else 'neutral' }}">{{ health.open_positions }}</div>
+        <div class="sub {{ 'negative' if health.halted else 'positive' }}">
+            {% if health.halted %}HALTED{% else %}{{ pos_summary }}{% endif %}
+        </div>
+    </div>
+    <div class="card">
+        <div class="label">Bot Status</div>
+        <div class="value {{ 'positive' if health.bot_running else 'negative' }}" style="font-size:1.4rem;">
+            {% if health.bot_running %}Connected{% else %}Offline{% endif %}
+        </div>
+        <div class="sub muted">
+            {% if last_updated %}Last: {{ last_updated[11:19] if last_updated|length > 19 else last_updated }}{% else %}—{% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Charts row -->
+<div class="chart-row">
+    <div class="chart-container" style="height:300px;">
+        <div class="chart-title">Equity Curve</div>
+        <div class="chart-sub">Cumulative P&L — last 30 days</div>
+        <canvas id="equityChart"></canvas>
+    </div>
+    <div class="chart-container" style="height:300px;">
+        <div class="chart-title">P&L by Day</div>
+        <div class="chart-sub">Current week</div>
+        <canvas id="dailyBarsChart"></canvas>
+    </div>
+</div>
+
+<!-- Bottom two-panel layout: Recent Trades + Open Position Monitor -->
+<div style="display:grid; grid-template-columns:3fr 2fr; gap:1rem;">
+
+    <!-- Recent Trades -->
+    <div class="table-wrap">
+        <div class="table-header">Recent Trades <span class="table-sub">each row opens a full trade detail timeline</span></div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Contract</th>
+                    <th>Source</th>
+                    <th>Side</th>
+                    <th>Qty</th>
+                    <th>Price</th>
+                    <th>P&L</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for t in recent_trades %}
+                <tr class="clickable-row" onclick="window.location='/trade/{{ t.position_id }}'">
+                    <td>{{ t.execution_time[11:16] if t.execution_time and t.execution_time|length > 16 else t.execution_time or '' }}</td>
+                    <td><strong>{{ t.ticker }}</strong> {{ t.contract_symbol }}</td>
+                    <td>
+                        {% if t.source %}
+                            <span class="badge {{ 'badge-blue' if t.source == 'telegram' else 'badge-purple' }}">{{ t.source }}</span>
+                        {% else %}
+                            <span class="badge badge-muted">bot</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge {{ 'badge-green' if t.side == 'BOT' else 'badge-red' }}">
+                            {% if t.side == 'BOT' %}entry{% else %}close{% endif %}
+                        </span>
+                    </td>
+                    <td>{{ t.contracts }}</td>
+                    <td>${{ "%.2f"|format(t.fill_price) }}</td>
+                    <td class="{{ 'pnl-positive' if (t.pnl or 0) > 0 else 'pnl-negative' if (t.pnl or 0) < 0 else 'pnl-zero' }}">
+                        {% if t.pnl %}{{ '+' if t.pnl >= 0 }}${{ "%.2f"|format(t.pnl) }}{% else %}—{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+                {% if not recent_trades %}
+                <tr><td colspan="7" style="text-align:center; color:var(--text-secondary); padding:1.5rem;">No recent trades</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Open Position Monitor -->
+    <div class="table-wrap">
+        <div class="table-header">Open Position Monitor <span class="table-sub">live exposure with stop tracking</span></div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Symbol</th>
+                    <th>Qty</th>
+                    <th>Entry</th>
+                    <th>U P&L</th>
+                    <th>Stop</th>
+                    <th>Expiry</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for pos in positions %}
+                <tr class="clickable-row" onclick="window.location='/trade/{{ pos.position_id }}'">
+                    <td><strong>{{ pos.ticker }}</strong> {{ pos.contract_symbol[pos.ticker|length:] if pos.contract_symbol else '' }}</td>
+                    <td>{{ pos.contracts }}</td>
+                    <td>${{ "%.2f"|format(pos.entry_price) }}</td>
+                    <td class="{{ 'pnl-positive' if (pos.unrealized_pnl or 0) > 0 else 'pnl-negative' if (pos.unrealized_pnl or 0) < 0 else 'pnl-zero' }}">
+                        {{ '+' if (pos.unrealized_pnl or 0) >= 0 }}${{ "%.2f"|format(pos.unrealized_pnl or 0) }}
+                    </td>
+                    <td>{{ "%.2f"|format(pos.stop_price) if pos.stop_price else '—' }}</td>
+                    <td>{{ pos.expiry_date }}</td>
+                </tr>
+                {% endfor %}
+                {% if not positions %}
+                <tr><td colspan="6" style="text-align:center; color:var(--text-secondary); padding:1.5rem;">No open positions</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const pnlData = {{ daily_pnl | tojson }};
+    if (pnlData.length > 0) {
+        createEquityCurve('equityChart', pnlData);
+        createDailyBars('dailyBarsChart', pnlData.slice(-5));
+    }
+</script>
+{% endblock %}

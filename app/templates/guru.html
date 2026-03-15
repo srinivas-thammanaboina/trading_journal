@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% block title %}Guru vs Bot - Trading Journal{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">Guru vs Bot Performance</h1>
+    <p class="page-subtitle">Signal quality vs execution quality — split view</p>
+</div>
+
+<!-- Filters -->
+<div class="filters">
+    <form method="GET" action="/guru" style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
+        <input type="date" name="start" value="{{ filter_start or '' }}" placeholder="Start">
+        <input type="date" name="end" value="{{ filter_end or '' }}" placeholder="End">
+        <select name="ticker">
+            <option value="">All tickers</option>
+            {% for t in available_tickers %}
+            <option value="{{ t }}" {{ 'selected' if filter_ticker == t }}>{{ t }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit">Filter</button>
+        <a href="/guru" class="clear-link">Clear</a>
+    </form>
+</div>
+
+<!-- Three-panel: Signal Quality + Execution Quality + Gap to Investigate -->
+<div class="three-col" style="margin-bottom:1.5rem;">
+
+    <!-- Signal Quality -->
+    <div class="card">
+        <div style="font-weight:600; margin-bottom:0.15rem;">Signal Quality</div>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:1.25rem;">What the guru actually sent</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem; text-align:center;">
+            <div>
+                <div class="label">Signals</div>
+                <div style="font-size:1.6rem; font-weight:700; font-family:var(--font-mono);">{{ guru_stats.total_signals }}</div>
+            </div>
+            <div>
+                <div class="label">Entries</div>
+                <div style="font-size:1.6rem; font-weight:700; font-family:var(--font-mono);">{{ guru_stats.buys }}</div>
+            </div>
+            <div>
+                <div class="label">Exits</div>
+                <div style="font-size:1.6rem; font-weight:700; font-family:var(--font-mono);">{{ guru_stats.closes }}</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Execution Quality -->
+    <div class="card">
+        <div style="font-weight:600; margin-bottom:0.15rem;">Execution Quality</div>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:1.25rem;">How well the bot followed</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem; text-align:center;">
+            <div>
+                <div class="label">Executed</div>
+                <div style="font-size:1.6rem; font-weight:700; font-family:var(--font-mono);">{{ guru_stats.executed }}</div>
+            </div>
+            <div>
+                <div class="label">Fill Rate</div>
+                <div style="font-size:1.6rem; font-weight:700; font-family:var(--font-mono); color:{% if fill_rate >= 75 %}var(--green){% elif fill_rate >= 50 %}var(--yellow){% elif fill_rate >= 30 %}var(--red){% else %}#d32f2f{% endif %};">{{ "%.1f"|format(fill_rate) }}%</div>
+            </div>
+            <div>
+                <div class="label">P&L</div>
+                <div style="font-size:1.6rem; font-weight:700; font-family:var(--font-mono); color:{{ 'var(--green)' if bot_total_pnl > 0 else 'var(--red)' if bot_total_pnl < 0 else 'var(--text-primary)' }};">
+                    {{ '+' if bot_total_pnl >= 0 }}${{ "%.0f"|format(bot_total_pnl) }}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Gap to Investigate -->
+    <div class="card">
+        <div style="font-weight:600; margin-bottom:0.15rem;">Gap to Investigate</div>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:1rem;">Missed opportunities</div>
+        <div style="font-size:0.9rem; margin-bottom:0.75rem;">
+            Potential misses: <strong>{{ missed }}</strong>
+        </div>
+        {% if gap_reasons %}
+        <div style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:0.5rem;">Likely causes:</div>
+        <ul style="list-style:none; padding:0; margin:0;">
+            {% for reason, count in gap_reasons %}
+            <li style="font-size:0.8rem; color:var(--text-secondary); padding:0.15rem 0;">
+                &bull; {{ reason }} <span style="color:var(--text-muted);">({{ count }})</span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <div style="font-size:0.8rem; color:var(--text-muted);">No rejections — perfect execution</div>
+        {% endif %}
+    </div>
+
+</div>
+
+<!-- Per-Ticker Comparison -->
+<div class="table-wrap">
+    <div class="table-header">Per-Ticker Comparison <span class="table-sub">Signal quality vs execution quality by ticker</span></div>
+    <table>
+        <thead>
+            <tr>
+                <th>Ticker</th>
+                <th>Guru Signals</th>
+                <th>Guru Entries</th>
+                <th>Guru Exits</th>
+                <th>Bot Executed</th>
+                <th>Bot Rejected</th>
+                <th>Bot Trades</th>
+                <th>Bot Win Rate</th>
+                <th>Bot P&L</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in comparison %}
+            <tr>
+                <td><strong>{{ row.ticker }}</strong></td>
+                <td>{{ row.guru_signals }}</td>
+                <td>{{ row.guru_buys }}</td>
+                <td>{{ row.guru_closes }}</td>
+                <td>
+                    <span class="badge badge-green">{{ row.bot_executed }}</span>
+                </td>
+                <td>
+                    {% if row.bot_rejected > 0 %}
+                    <span class="badge badge-red">{{ row.bot_rejected }}</span>
+                    {% else %}0{% endif %}
+                </td>
+                <td>{{ row.bot_trades }}</td>
+                <td>{{ "%.1f"|format(row.bot_win_rate) }}%</td>
+                <td class="{{ 'pnl-positive' if row.bot_pnl > 0 else 'pnl-negative' if row.bot_pnl < 0 else 'pnl-zero' }}">
+                    {{ '+' if row.bot_pnl >= 0 }}${{ "%.2f"|format(row.bot_pnl) }}
+                </td>
+            </tr>
+            {% endfor %}
+            {% if not comparison %}
+            <tr><td colspan="9" style="text-align:center; color:var(--text-secondary); padding:2rem;">No data yet</td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Recent Guru Signals -->
+<div class="table-wrap" style="margin-top:1.5rem;">
+    <div class="table-header">Recent Guru Signals <span class="table-sub">Useful as a source audit, not just a trade log</span></div>
+    <table>
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Source</th>
+                <th>Ticker</th>
+                <th>Action</th>
+                <th>Strike</th>
+                <th>R</th>
+                <th>Entry</th>
+                <th>Executed?</th>
+                <th>Outcome</th>
+                <th>Reason</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in signals %}
+            <tr>
+                <td style="white-space:nowrap;">{{ s.signal_time[5:16] if s.signal_time and s.signal_time|length > 16 else s.signal_time or '' }}</td>
+                <td><span class="badge {{ 'badge-blue' if s.source == 'telegram' else 'badge-purple' }}">{{ s.source }}</span></td>
+                <td><strong>{{ s.ticker }}</strong></td>
+                <td>
+                    {% if s.action == 'BUY' %}<span class="badge badge-green">buy</span>
+                    {% elif s.action in ('CLOSE', 'SELL') %}<span class="badge badge-red">close</span>
+                    {% elif s.action == 'PARTIAL_CLOSE' %}<span class="badge badge-yellow">partial</span>
+                    {% else %}<span class="badge badge-yellow">{{ s.action|lower }}</span>{% endif %}
+                </td>
+                <td>{{ "%.0f"|format(s.strike) if s.strike else '—' }}</td>
+                <td>{{ s.right or '—' }}</td>
+                <td>{{ "$%.2f"|format(s.entry_price) if s.entry_price else '—' }}</td>
+                <td>
+                    {% if s.we_executed %}<span class="badge badge-green">Yes</span>
+                    {% else %}<span class="badge badge-red">No</span>{% endif %}
+                </td>
+                <td>
+                    {% if s.our_outcome == 'filled' %}<span class="badge badge-green">filled</span>
+                    {% elif s.our_outcome == 'rejected' %}<span class="badge badge-red">rejected</span>
+                    {% else %}<span class="badge badge-muted">{{ s.our_outcome or '—' }}</span>{% endif %}
+                </td>
+                <td style="font-family:inherit; font-size:0.78rem; color:var(--text-secondary);">
+                    {{ s.our_reject_reason or '' }}
+                </td>
+            </tr>
+            {% endfor %}
+            {% if not signals %}
+            <tr><td colspan="10" style="text-align:center; color:var(--text-secondary); padding:2rem;">No guru signals recorded yet</td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

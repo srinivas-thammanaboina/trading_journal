@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}Risk & Health - Trading Journal{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">Risk Dashboard & Bot Health</h1>
+    <p class="page-subtitle">Operational safety layer with urgency indicators and heartbeat awareness</p>
+</div>
+
+<!-- Status cards -->
+<div class="card-grid" style="grid-template-columns: repeat(5, 1fr);">
+    <div class="card">
+        <div class="label">Daily Realized P&L</div>
+        <div class="value {{ 'positive' if health.daily_realized_pnl >= 0 else 'negative' }}">
+            {{ '+' if health.daily_realized_pnl >= 0 }}${{ "%.0f"|format(health.daily_realized_pnl) }}
+        </div>
+        <div class="sub negative">limit: -$1,000</div>
+    </div>
+    <div class="card">
+        <div class="label">Risk Used</div>
+        <div class="value {{ 'positive' if risk_pct < 50 else 'negative' if risk_pct > 80 else 'neutral' }}">
+            {{ "%.0f"|format(risk_pct) }}%
+        </div>
+        <div class="sub muted">closed-trades basis</div>
+    </div>
+    <div class="card">
+        <div class="label">Gateway Status</div>
+        <div class="value">
+            {% if health.bot_running %}
+            <span style="color:var(--green);">Connected</span>
+            {% else %}
+            <span style="color:var(--red);">Offline</span>
+            {% endif %}
+        </div>
+        <div class="sub muted">
+            {% if health.last_updated %}heartbeat {{ health.last_updated[11:19] }}{% else %}unknown{% endif %}
+        </div>
+    </div>
+    <div class="card">
+        <div class="label">System Mode</div>
+        <div class="value neutral">Read Only</div>
+        <div class="sub positive">journal safe</div>
+    </div>
+    <div class="card">
+        <div class="label">Market Close</div>
+        <div class="value {{ close_color }}" {% if close_color == 'warning' %}style="color:var(--yellow);"{% endif %}>
+            {{ close_label }}
+        </div>
+        <div class="sub muted">
+            {% if auto_close_triggered %}{{ auto_close_count }} auto-closed
+            {% elif same_day_positions|length > 0 %}{{ same_day_positions|length }} position{{ 's' if same_day_positions|length != 1 }} expiring
+            {% else %}no same-day expiry{% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="two-col">
+    <!-- Health checks -->
+    <div class="card card-lg">
+        <div class="chart-title">Health Checks</div>
+        <div class="chart-sub">Pre-market + live monitoring</div>
+        <ul class="health-list">
+            <li>
+                <span>IBKR connection</span>
+                <span class="badge {{ 'badge-green' if health.bot_running else 'badge-red' }}">
+                    {{ 'Healthy' if health.bot_running else 'Down' }}
+                </span>
+            </li>
+            <li>
+                <span>Daily halt</span>
+                <span class="badge {{ 'badge-red' if health.halted else 'badge-green' }}">
+                    {{ 'HALTED' if health.halted else 'Clear' }}
+                </span>
+            </li>
+            <li>
+                <span>Open positions</span>
+                <span>{{ health.open_positions }}</span>
+            </li>
+            <li>
+                <span>Trade date</span>
+                <span>{{ health.trade_date }}</span>
+            </li>
+            <li>
+                <span>Last state update</span>
+                <span>{{ health.last_updated[11:19] if health.last_updated and health.last_updated|length > 19 else health.last_updated or '—' }}</span>
+            </li>
+        </ul>
+    </div>
+
+    <!-- Risk controls -->
+    <div class="card card-lg">
+        <div class="chart-title">Risk Controls</div>
+        <div class="chart-sub">Guardrails</div>
+        <div style="margin-top:0.5rem;">
+            <div class="risk-item">&bull; Daily halt uses <strong>realized P&L only</strong></div>
+            <div class="risk-item">&bull; Overnight swing unrealized excluded</div>
+            <div class="risk-item">&bull; Max concurrent positions per ticker</div>
+            <div class="risk-item">&bull; EOD auto-close for same-day expiry</div>
+            <div class="risk-item">&bull; Weekend + holiday trading blocked</div>
+            <div class="risk-item">&bull; Entry price cap enforced</div>
+            <div class="risk-item">&bull; Read-only journal: no trade/risk controls exposed</div>
+        </div>
+    </div>
+</div>
+
+<!-- Auto-Close Monitor -->
+<div class="card card-lg" style="margin-bottom:1.5rem;">
+    <div class="chart-title">Auto-Close Monitor</div>
+    <div class="chart-sub">Same-day expiry positions — auto-close at 3:55 PM ET</div>
+
+    {% if same_day_positions %}
+    <div class="table-wrap" style="margin-top:1rem; border:none;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Ticker</th>
+                    <th>Contract</th>
+                    <th>Qty</th>
+                    <th>Entry</th>
+                    <th>Stop</th>
+                    <th>U P&L</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for pos in same_day_positions %}
+                <tr>
+                    <td><strong>{{ pos.ticker }}</strong></td>
+                    <td>{{ pos.contract_symbol }}</td>
+                    <td>{{ pos.contracts }}</td>
+                    <td>${{ "%.2f"|format(pos.entry_price) }}</td>
+                    <td>{{ "%.2f"|format(pos.stop_price) if pos.stop_price else '—' }}</td>
+                    <td class="{{ 'pnl-positive' if (pos.unrealized_pnl or 0) > 0 else 'pnl-negative' if (pos.unrealized_pnl or 0) < 0 else 'pnl-zero' }}">
+                        {{ '+' if (pos.unrealized_pnl or 0) >= 0 }}${{ "%.2f"|format(pos.unrealized_pnl or 0) }}
+                    </td>
+                    <td>
+                        {% if auto_close_triggered %}
+                        <span class="badge badge-yellow">Pending close</span>
+                        {% else %}
+                        <span class="badge badge-blue">{{ close_label }} to close</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div style="margin-top:1rem; padding:1.5rem; text-align:center; color:var(--text-secondary); background:var(--bg-secondary); border-radius:6px;">
+        {% if auto_close_count > 0 %}
+        {{ auto_close_count }} position{{ 's' if auto_close_count != 1 }} auto-closed today
+        {% else %}
+        No same-day expiry positions — nothing to auto-close
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+
+<!-- Deployment blueprint -->
+<div class="card card-lg">
+    <div class="chart-title">Deployment Blueprint</div>
+    <div class="chart-sub">Phase-1 recommended architecture</div>
+    <div style="margin-top:0.75rem; font-size:0.85rem; color:var(--text-secondary); line-height:1.8;">
+        <div>Internet &rarr; Caddy (HTTPS) &rarr; FastAPI journal on 127.0.0.1:8001</div>
+        <div style="margin-top:0.5rem;">Bot remains separate and private on localhost.</div>
+        <div>Journal reads SQLite journal DB in read-only mode and exposes:</div>
+        <div style="font-family:var(--font-mono); margin-top:0.25rem; color:var(--text-primary);">
+            /dashboard &nbsp; /trades &nbsp; /alerts &nbsp; /analytics &nbsp; /guru &nbsp; /health
+        </div>
+        <div style="margin-top:0.5rem;">Suggested next page: /positions for live exposure + stop monitoring.</div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,676 @@
+/* Trading Journal — Dark theme with sidebar layout */
+
+:root {
+    --bg-primary: #0d1117;
+    --bg-secondary: #161b22;
+    --bg-card: #1c2128;
+    --bg-card-hover: #22272e;
+    --border: #30363d;
+    --text-primary: #e6edf3;
+    --text-secondary: #8b949e;
+    --text-muted: #6e7681;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --orange: #db6d28;
+    --purple: #bc8cff;
+    --font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    --sidebar-width: 200px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    line-height: 1.6;
+}
+
+/* ── Layout ───────────────────────────────────────── */
+.layout {
+    display: flex;
+    min-height: 100vh;
+}
+
+/* ── Sidebar ──────────────────────────────────────── */
+.sidebar {
+    width: var(--sidebar-width);
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    z-index: 10;
+}
+
+.sidebar-logo {
+    padding: 1.5rem 1.25rem 1rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.logo-text {
+    font-size: 1.5rem;
+    font-weight: 800;
+    line-height: 1.1;
+    color: var(--text-primary);
+}
+
+.logo-sub {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+}
+
+.sidebar-nav {
+    flex: 1;
+    padding: 0.75rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.nav-item {
+    display: block;
+    padding: 0.6rem 1.25rem;
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 500;
+    border-left: 3px solid transparent;
+    transition: all 0.15s;
+}
+
+.nav-item:hover {
+    color: var(--text-primary);
+    background: rgba(88, 166, 255, 0.04);
+}
+
+.nav-item.active {
+    color: var(--text-primary);
+    background: rgba(88, 166, 255, 0.08);
+    border-left-color: var(--accent);
+    font-weight: 600;
+}
+
+.sidebar-footer {
+    padding: 1rem 1.25rem;
+    border-top: 1px solid var(--border);
+}
+
+.mode-badge {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--green);
+    letter-spacing: 0.08em;
+    margin-bottom: 0.5rem;
+}
+
+.logout-link {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    text-decoration: none;
+}
+
+.logout-link:hover { color: var(--text-secondary); }
+
+/* ── Main content ─────────────────────────────────── */
+.main-content {
+    flex: 1;
+    margin-left: var(--sidebar-width);
+    padding: 2rem 2.5rem;
+    max-width: 1400px;
+}
+
+/* ── Page header ──────────────────────────────────── */
+.page-header {
+    margin-bottom: 1.75rem;
+}
+
+.page-title {
+    font-size: 1.6rem;
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+}
+
+.page-subtitle {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+/* ── Cards ────────────────────────────────────────── */
+.card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+}
+
+.card-lg {
+    padding: 1.5rem;
+}
+
+.card .label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 0.3rem;
+    font-weight: 600;
+}
+
+.card .value {
+    font-size: 1.8rem;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    line-height: 1.2;
+}
+
+.card .sub {
+    font-size: 0.75rem;
+    margin-top: 0.2rem;
+    font-weight: 500;
+}
+
+.card .value.positive, .card .sub.positive { color: var(--green); }
+.card .value.negative, .card .sub.negative { color: var(--red); }
+.card .value.neutral { color: var(--text-primary); }
+.card .sub.muted { color: var(--text-secondary); }
+
+/* ── Section titles ───────────────────────────────── */
+.section-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 1.5rem 0 0.75rem;
+}
+
+.section-sub {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+/* ── Status badges ────────────────────────────────── */
+.badge {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    border-radius: 12px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.badge-green { background: rgba(63, 185, 80, 0.15); color: var(--green); }
+.badge-red { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+.badge-yellow { background: rgba(210, 153, 34, 0.15); color: var(--yellow); }
+.badge-blue { background: rgba(88, 166, 255, 0.15); color: var(--accent); }
+.badge-purple { background: rgba(188, 140, 255, 0.15); color: var(--purple); }
+.badge-muted { background: rgba(139, 148, 158, 0.12); color: var(--text-secondary); }
+
+/* ── Tables ───────────────────────────────────────── */
+.table-wrap {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow-x: auto;
+    margin-bottom: 1.5rem;
+}
+
+.table-header {
+    padding: 1rem 1.25rem 0.5rem;
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.table-sub {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+thead th {
+    text-align: left;
+    padding: 0.65rem 1rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+tbody td {
+    padding: 0.55rem 1rem;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+}
+
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover { background: rgba(88, 166, 255, 0.03); }
+
+/* ── P&L coloring ─────────────────────────────────── */
+.pnl-positive { color: var(--green); }
+.pnl-negative { color: var(--red); }
+.pnl-zero { color: var(--text-secondary); }
+
+/* ── Charts ───────────────────────────────────────── */
+.chart-container {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+    margin-bottom: 1.5rem;
+}
+
+.chart-title {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 0.2rem;
+}
+
+.chart-sub {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+}
+
+/* ── Two-column chart row ─────────────────────────── */
+.chart-row {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+/* ── Pipeline funnel ──────────────────────────────── */
+.pipeline {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 1.5rem;
+}
+
+.pipeline-step {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    flex: 1;
+    text-align: center;
+}
+
+.pipeline-step .value {
+    font-size: 2rem;
+    font-weight: 700;
+    font-family: var(--font-mono);
+}
+
+.pipeline-step .label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.25rem;
+    font-weight: 600;
+}
+
+.pipeline-step .sub {
+    font-size: 0.72rem;
+    margin-top: 0.15rem;
+}
+
+.pipeline-arrow {
+    font-size: 1.5rem;
+    color: var(--text-muted);
+    padding: 0 0.3rem;
+    flex-shrink: 0;
+}
+
+/* ── Grid layouts ─────────────────────────────────── */
+.two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.three-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+/* ── Filters ──────────────────────────────────────── */
+.filters {
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.filters input, .filters select {
+    padding: 0.45rem 0.7rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 0.82rem;
+}
+
+.filters button {
+    padding: 0.45rem 0.9rem;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 500;
+}
+
+.filters .clear-link {
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 0.82rem;
+    padding: 0.45rem 0.5rem;
+}
+
+/* ── Login ────────────────────────────────────────── */
+.login-wrap {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+}
+
+.login-box {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 2.5rem;
+    width: 100%;
+    max-width: 360px;
+}
+
+.login-box h1 {
+    font-size: 1.3rem;
+    margin-bottom: 0.25rem;
+}
+
+.login-box .login-sub {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    margin-bottom: 1.5rem;
+}
+
+.login-box input[type="password"] {
+    width: 100%;
+    padding: 0.65rem 0.9rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+    outline: none;
+}
+
+.login-box input[type="password"]:focus {
+    border-color: var(--accent);
+}
+
+.login-box button {
+    width: 100%;
+    padding: 0.65rem;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.login-box button:hover { opacity: 0.9; }
+
+.login-error {
+    background: rgba(248, 81, 73, 0.1);
+    color: var(--red);
+    padding: 0.55rem 0.9rem;
+    border-radius: 6px;
+    font-size: 0.82rem;
+    margin-bottom: 1rem;
+    text-align: center;
+}
+
+/* ── Health page specifics ────────────────────────── */
+.health-list {
+    list-style: none;
+}
+
+.health-list li {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.85rem;
+    display: flex;
+    justify-content: space-between;
+}
+
+.health-list li:last-child { border-bottom: none; }
+
+.risk-item {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    padding: 0.35rem 0;
+    line-height: 1.5;
+}
+
+/* ── Trade Calendar ───────────────────────────────── */
+.cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+}
+
+.cal-grid-weekly {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr) 90px;
+    gap: 2px;
+}
+
+.cal-header {
+    text-align: center;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.5rem 0;
+}
+
+.cal-cell {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.4rem 0.5rem;
+    min-height: 70px;
+    position: relative;
+}
+
+.cal-empty {
+    background: transparent;
+    border-color: transparent;
+}
+
+.cal-win {
+    background: rgba(63, 185, 80, 0.12);
+    border-color: rgba(63, 185, 80, 0.25);
+}
+
+.cal-loss {
+    background: rgba(248, 81, 73, 0.12);
+    border-color: rgba(248, 81, 73, 0.25);
+}
+
+.cal-today {
+    border-color: var(--accent) !important;
+}
+
+.cal-day {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-align: right;
+    margin-bottom: 0.2rem;
+}
+
+.cal-day-today {
+    background: var(--accent);
+    color: #fff;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    float: right;
+    font-weight: 600;
+}
+
+.cal-pnl {
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    font-weight: 700;
+    text-align: center;
+    margin-top: 0.15rem;
+}
+
+.cal-trades {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    text-align: center;
+    margin-top: 0.1rem;
+}
+
+.cal-week-summary {
+    background: var(--bg-card);
+    border-color: var(--border);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+/* ── Trade Detail: Timeline ───────────────────────── */
+.timeline {
+    padding: 1rem 1.25rem;
+}
+
+.timeline-item {
+    display: flex;
+    gap: 0.75rem;
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.timeline-item:last-child { border-bottom: none; }
+
+.timeline-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-top: 0.35rem;
+    flex-shrink: 0;
+}
+
+.dot-blue { background: var(--accent); }
+.dot-cyan { background: #39d2c0; }
+.dot-green { background: var(--green); }
+.dot-red { background: var(--red); }
+.dot-yellow { background: var(--yellow); }
+.dot-orange { background: var(--orange); }
+.dot-gray { background: var(--text-muted); }
+
+.timeline-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.timeline-time {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.timeline-event {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.timeline-detail {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    word-break: break-word;
+}
+
+/* ── Trade Detail: Detail grid ───────────────────── */
+.detail-grid {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 0.5rem 1rem;
+    align-items: start;
+}
+
+.detail-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 600;
+    padding-top: 0.15rem;
+}
+
+.detail-value {
+    font-size: 0.85rem;
+    color: var(--text-primary);
+}
+
+/* ── Clickable table rows ────────────────────────── */
+.clickable-row {
+    cursor: pointer;
+    transition: background 0.1s;
+}
+
+.clickable-row:hover {
+    background: rgba(88, 166, 255, 0.06) !important;
+}
+
+/* ── Responsive ───────────────────────────────────── */
+@media (max-width: 900px) {
+    .sidebar { width: 60px; }
+    .sidebar-logo, .sidebar-footer .mode-badge, .logo-sub { display: none; }
+    .nav-item { padding: 0.6rem; font-size: 0.7rem; text-align: center; }
+    .main-content { margin-left: 60px; padding: 1rem; }
+    .chart-row { grid-template-columns: 1fr; }
+    .two-col, .three-col { grid-template-columns: 1fr; }
+    .pipeline { flex-wrap: wrap; }
+}
