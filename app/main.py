@@ -14,12 +14,17 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.config import settings
 from app.db import close_db, get_db
 
-# Configure logging
+# Configure logging — WARNING by default (errors only), DEBUG if enabled
+log_level = logging.DEBUG if settings.DEBUG else logging.WARNING
 logging.basicConfig(
-    level=logging.DEBUG if settings.DEBUG else logging.INFO,
+    level=log_level,
     format="%(asctime)s %(levelname)-8s [%(name)s] %(message)s",
 )
-logger = logging.getLogger(__name__)
+# App logger at INFO to capture startup/auth events
+logger = logging.getLogger("app")
+logger.setLevel(logging.INFO)
+# Suppress noisy uvicorn access logs
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 
 @asynccontextmanager
