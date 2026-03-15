@@ -61,7 +61,7 @@
 </div>
 
 <!-- Bottom two-panel layout: Recent Trades + Open Position Monitor -->
-<div style="display:grid; grid-template-columns:3fr 2fr; gap:1rem;">
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
 
     <!-- Recent Trades -->
     <div class="table-wrap">
@@ -126,14 +126,16 @@
             <tbody>
                 {% for pos in positions %}
                 <tr class="clickable-row" onclick="window.location='/trade/{{ pos.position_id }}'">
-                    <td><strong>{{ pos.ticker }}</strong> {{ pos.contract_symbol[pos.ticker|length:] if pos.contract_symbol else '' }}</td>
+                    <td style="white-space:nowrap;"><strong>{{ pos.ticker }}</strong>
+                        {% if pos.strike and pos.right %}{{ pos.strike|int }}{{ pos.right }}{% elif pos.contract_symbol %}{{ pos.contract_symbol }}{% endif %}
+                    </td>
                     <td>{{ pos.contracts }}</td>
                     <td>${{ "%.2f"|format(pos.entry_price) }}</td>
                     <td class="{{ 'pnl-positive' if (pos.unrealized_pnl or 0) > 0 else 'pnl-negative' if (pos.unrealized_pnl or 0) < 0 else 'pnl-zero' }}">
                         {{ '+' if (pos.unrealized_pnl or 0) >= 0 }}${{ "%.2f"|format(pos.unrealized_pnl or 0) }}
                     </td>
                     <td>{{ "%.2f"|format(pos.stop_price) if pos.stop_price else '—' }}</td>
-                    <td>{{ pos.expiry_date }}</td>
+                    <td style="white-space:nowrap;">{{ pos.expiry_date[5:] if pos.expiry_date and pos.expiry_date|length >= 10 else pos.expiry_date }}</td>
                 </tr>
                 {% endfor %}
                 {% if not positions %}

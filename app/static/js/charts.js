@@ -162,9 +162,14 @@ function createWinLossDonut(canvasId, stats) {
         },
         options: {
             responsive: true,
-            cutout: '65%',
+            maintainAspectRatio: false,
+            cutout: '60%',
+            layout: { padding: { bottom: 5 } },
             plugins: {
-                legend: { position: 'bottom', labels: { padding: 15 } },
+                legend: {
+                    position: 'bottom',
+                    labels: { padding: 12, boxWidth: 12, font: { size: 11 } },
+                },
             },
         },
     });
