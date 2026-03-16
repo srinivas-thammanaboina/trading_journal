@@ -615,6 +615,57 @@ async def guru_page(request: Request):
     bot_total_wins = sum(b["wins"] for b in bot_by_ticker.values())
     fill_rate = round(executed / total * 100, 1) if total else 0.0
 
+    # Unsupported ticker performance (guru signals we skipped)
+    # Pair BUY→CLOSE by ticker+right+strike to estimate guru P&L
+    unsupported_sql = """
+        SELECT * FROM guru_signals
+        WHERE our_outcome = 'skipped'
+        ORDER BY ticker, signal_time
+    """
+    skipped_rows = conn.execute(unsupported_sql).fetchall()
+
+    # Group by ticker
+    unsupported_tickers: dict = {}
+    open_entries: dict = {}  # key: (ticker, strike, right) → entry row
+
+    for r in skipped_rows:
+        t = r["ticker"]
+        if t not in unsupported_tickers:
+            unsupported_tickers[t] = {
+                "ticker": t, "total_signals": 0, "entries": 0, "exits": 0,
+                "wins": 0, "losses": 0, "total_pnl": 0.0, "trades": [],
+            }
+        unsupported_tickers[t]["total_signals"] += 1
+
+        action = (r["action"] or "").upper()
+        strike = r["strike"]
+        right = r["right"]
+        key = (t, strike, right)
+
+        if action == "BUY" and r["entry_price"]:
+            unsupported_tickers[t]["entries"] += 1
+            open_entries[key] = r
+        elif action in ("CLOSE", "SELL") and key in open_entries:
+            entry = open_entries.pop(key)
+            unsupported_tickers[t]["exits"] += 1
+            if r["exit_price"] and entry["entry_price"]:
+                pnl = round((r["exit_price"] - entry["entry_price"]) * 100, 2)
+                unsupported_tickers[t]["total_pnl"] += pnl
+                if pnl > 0:
+                    unsupported_tickers[t]["wins"] += 1
+                else:
+                    unsupported_tickers[t]["losses"] += 1
+
+    # Compute win rate
+    unsupported_list = []
+    for t, data in sorted(unsupported_tickers.items()):
+        closed = data["wins"] + data["losses"]
+        data["closed_trades"] = closed
+        data["win_rate"] = round(data["wins"] / closed * 100, 1) if closed else 0.0
+        data["total_pnl"] = round(data["total_pnl"], 2)
+        data["open_entries"] = data["entries"] - data["exits"]
+        unsupported_list.append(data)
+
     return templates.TemplateResponse("guru.html", {
         "request": request,
         "active_page": "guru",
@@ -630,6 +681,7 @@ async def guru_page(request: Request):
         "fill_rate": fill_rate,
         "gap_reasons": gap_reasons,
         "missed": missed,
+        "unsupported_tickers": unsupported_list,
     })
 
 

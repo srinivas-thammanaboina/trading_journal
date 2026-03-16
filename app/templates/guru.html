@@ -190,4 +190,54 @@
         </tbody>
     </table>
 </div>
+
+<!-- Unsupported Ticker Performance -->
+{% if unsupported_tickers %}
+<div class="table-wrap" style="margin-top:1.5rem;">
+    <div class="table-header">Unsupported Ticker Tracking <span class="table-sub">Guru performance on tickers we don't trade — use to decide what to add</span></div>
+    <table>
+        <thead>
+            <tr>
+                <th>Ticker</th>
+                <th>Signals</th>
+                <th>Entries</th>
+                <th>Exits</th>
+                <th>Open</th>
+                <th>Closed</th>
+                <th>Wins</th>
+                <th>Losses</th>
+                <th>Win Rate</th>
+                <th>Est. P&L</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for t in unsupported_tickers %}
+            <tr>
+                <td><strong>{{ t.ticker }}</strong></td>
+                <td>{{ t.total_signals }}</td>
+                <td>{{ t.entries }}</td>
+                <td>{{ t.exits }}</td>
+                <td>{% if t.open_entries > 0 %}<span class="badge badge-yellow">{{ t.open_entries }}</span>{% else %}0{% endif %}</td>
+                <td>{{ t.closed_trades }}</td>
+                <td class="pnl-positive">{{ t.wins }}</td>
+                <td class="pnl-negative">{{ t.losses }}</td>
+                <td style="font-family:var(--font-mono);">
+                    {% if t.closed_trades > 0 %}
+                    <span style="color:{% if t.win_rate >= 60 %}var(--green){% elif t.win_rate >= 40 %}var(--yellow){% else %}var(--red){% endif %};">
+                        {{ "%.1f"|format(t.win_rate) }}%
+                    </span>
+                    {% else %}—{% endif %}
+                </td>
+                <td class="{{ 'pnl-positive' if t.total_pnl > 0 else 'pnl-negative' if t.total_pnl < 0 else 'pnl-zero' }}" style="font-family:var(--font-mono);">
+                    {% if t.closed_trades > 0 %}{{ '+' if t.total_pnl >= 0 }}${{ "%.0f"|format(t.total_pnl) }}{% else %}—{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div style="padding:0.75rem 1rem; font-size:0.78rem; color:var(--text-muted); border-top:1px solid var(--border);">
+        P&L estimated from guru's entry/exit prices × 1 contract (100 shares). Add ticker to TICKER_CONFIG if performance justifies it.
+    </div>
+</div>
+{% endif %}
 {% endblock %}
