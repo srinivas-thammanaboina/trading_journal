@@ -54,11 +54,20 @@ async def get_trades_pnl(
 ):
     """Paginated realized P&L events for trades table, with fill_type from executions."""
     conn = get_db()
-    # Left join executions to get fill_type for the exit (SLD side, matching position_id)
-    sql = """SELECT r.*, e.fill_type
-             FROM realized_pnl_events r
-             LEFT JOIN executions e ON e.position_id = r.position_id AND e.side = 'SLD'
-             WHERE 1=1"""
+    # Check if fill_type column exists (schema v3+)
+    has_fill_type = any(
+        col[1] == "fill_type"
+        for col in conn.execute("PRAGMA table_info(executions)").fetchall()
+    )
+    if has_fill_type:
+        sql = """SELECT r.*, e.fill_type
+                 FROM realized_pnl_events r
+                 LEFT JOIN executions e ON e.position_id = r.position_id AND e.side = 'SLD'
+                 WHERE 1=1"""
+    else:
+        sql = """SELECT r.*, NULL as fill_type
+                 FROM realized_pnl_events r
+                 WHERE 1=1"""
     count_sql = "SELECT COUNT(*) as cnt FROM realized_pnl_events WHERE 1=1"
     params: list = []
     count_params: list = []
