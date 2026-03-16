@@ -61,31 +61,36 @@ async def get_trades_pnl(
     )
     ft_col = "e.fill_type" if has_fill_type else "NULL as fill_type"
 
-    # Build date/ticker filters
+    # Build date/ticker filters (aliased for JOIN queries, plain for count)
     where_r = ""
     where_p = ""
+    where_plain = ""  # no table alias for count queries
     params: list = []
     count_params: list = []
 
     if date:
         where_r += " AND r.trade_date = ?"
         where_p += " AND e.trade_date = ?"
+        where_plain += " AND trade_date = ?"
         params.extend([date, date])
         count_params.extend([date, date])
     else:
         if start:
             where_r += " AND r.trade_date >= ?"
             where_p += " AND e.trade_date >= ?"
+            where_plain += " AND trade_date >= ?"
             params.extend([start, start])
             count_params.extend([start, start])
         if end:
             where_r += " AND r.trade_date <= ?"
             where_p += " AND e.trade_date <= ?"
+            where_plain += " AND trade_date <= ?"
             params.extend([end, end])
             count_params.extend([end, end])
     if ticker:
         where_r += " AND r.ticker = ?"
         where_p += " AND e.ticker = ?"
+        where_plain += " AND ticker = ?"
         params.extend([ticker.upper(), ticker.upper()])
         count_params.extend([ticker.upper(), ticker.upper()])
 
@@ -115,11 +120,11 @@ async def get_trades_pnl(
     union_sql = f"SELECT * FROM ({closed_sql} UNION ALL {open_sql}) ORDER BY event_time DESC"
 
     # Count
-    count_sql = f"""SELECT (SELECT COUNT(*) FROM realized_pnl_events WHERE 1=1 {where_r})
-                  + (SELECT COUNT(*) FROM executions e WHERE e.side = 'BOT'
-                     AND e.position_id IN (SELECT position_id FROM positions)
-                     AND e.position_id NOT IN (SELECT position_id FROM realized_pnl_events)
-                     {where_p}) as cnt"""
+    count_sql = f"""SELECT (SELECT COUNT(*) FROM realized_pnl_events WHERE 1=1 {where_plain})
+                  + (SELECT COUNT(*) FROM executions WHERE side = 'BOT'
+                     AND position_id IN (SELECT position_id FROM positions)
+                     AND position_id NOT IN (SELECT position_id FROM realized_pnl_events)
+                     {where_plain}) as cnt"""
     total = conn.execute(count_sql, count_params).fetchone()["cnt"]
     total_pages = min(25, max(1, (min(total, 500) + per_page - 1) // per_page))
     page = min(page, total_pages) if total_pages > 0 else 1

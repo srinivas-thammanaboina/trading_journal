@@ -47,8 +47,8 @@
     </div>
     <div class="card">
         <div class="label">Remaining</div>
-        <div class="value {{ 'positive' if summary.remaining > 0 else 'neutral' }}" style="font-size:1.2rem;">
-            {{ summary.remaining }} / {{ summary.contracts }}
+        <div class="value {{ 'positive' if (summary.remaining or 0) > 0 else 'neutral' }}" style="font-size:1.2rem;">
+            {{ summary.remaining|default(0) }} / {{ summary.contracts }}
         </div>
     </div>
     <div class="card">
