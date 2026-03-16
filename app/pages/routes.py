@@ -40,7 +40,7 @@ async def dashboard(request: Request):
 
     # Health / system state
     state = conn.execute(
-        "SELECT * FROM system_state WHERE trade_date = ?", (today,)
+        "SELECT * FROM system_state ORDER BY updated_at DESC LIMIT 1"
     ).fetchone()
     pos_count = conn.execute("SELECT COUNT(*) as cnt FROM positions").fetchone()
 
@@ -643,7 +643,7 @@ async def health_page(request: Request):
     today = date.today().isoformat()
 
     state = conn.execute(
-        "SELECT * FROM system_state WHERE trade_date = ?", (today,)
+        "SELECT * FROM system_state ORDER BY updated_at DESC LIMIT 1"
     ).fetchone()
     pos_count = conn.execute("SELECT COUNT(*) as cnt FROM positions").fetchone()
 
