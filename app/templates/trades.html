@@ -201,7 +201,8 @@ function loadTrades(page) {
                     const pnl = e.realized_pnl || 0;
                     const pnlClass = pnl > 0 ? 'pnl-positive' : pnl < 0 ? 'pnl-negative' : 'pnl-zero';
                     const pnlSign = pnl >= 0 ? '+' : '';
-                    const badgeClass = (e.event_type || '').includes('CLOSE') ? 'badge-red' : 'badge-yellow';
+                    const isOpen = e.trade_status === 'open' || e.event_type === 'OPEN';
+                    const badgeClass = isOpen ? 'badge-green' : (e.event_type || '').includes('CLOSE') ? 'badge-red' : 'badge-yellow';
                     const ft = e.fill_type || '—';
                     const ftColors = {limit: 'var(--green)', market: 'var(--yellow)', reconciled: '#ff8c00', partial: 'var(--accent)', auto_close: '#ff6b6b'};
                     const ftColor = ftColors[ft] || 'var(--text-secondary)';
@@ -226,7 +227,7 @@ function loadTrades(page) {
                         '<td><strong>' + (e.ticker || '') + '</strong> ' + (e.contract_symbol || '') + '</td>' +
                         '<td>$' + (e.entry_price || 0).toFixed(2) + '</td>' +
                         '<td>$' + (e.exit_price || 0).toFixed(2) + '</td>' +
-                        '<td class="' + pnlClass + '">' + pnlSign + '$' + pnl.toFixed(2) + '</td>' +
+                        '<td class="' + (isOpen ? '' : pnlClass) + '">' + (isOpen ? '<span style="color:var(--accent);">OPEN</span>' : pnlSign + '$' + pnl.toFixed(2)) + '</td>' +
                         '</tr>';
                 }).join('');
             }

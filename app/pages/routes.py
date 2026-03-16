@@ -144,10 +144,14 @@ async def trades_page(request: Request):
     filter_end = request.query_params.get("end", "")
     filter_ticker = request.query_params.get("ticker", "")
 
-    # Default to latest trading day if no filters
+    # Default to latest trading day if no filters (check both pnl_events and executions)
     if not filter_start and not filter_end:
         latest = conn.execute(
-            "SELECT MAX(trade_date) as d FROM realized_pnl_events"
+            """SELECT MAX(d) as d FROM (
+                SELECT MAX(trade_date) as d FROM realized_pnl_events
+                UNION ALL
+                SELECT MAX(trade_date) as d FROM executions
+            )"""
         ).fetchone()
         if latest and latest["d"]:
             filter_start = latest["d"]
@@ -181,14 +185,32 @@ async def trades_page(request: Request):
     biggest_winner = max(all_events, key=lambda e: e["realized_pnl"]) if all_events else None
     biggest_loser = min(all_events, key=lambda e: e["realized_pnl"]) if all_events else None
 
-    # Time-of-day breakdown
+    # Time-of-day breakdown — classify by ENTRY time, not exit time
     # Open: 9:30-10:00, Patience: 10:00-15:00, Lotto: 15:00-16:15
+    # Get entry times from executions (BOT side) for each position
     time_buckets = {"open": {"total": 0, "wins": 0, "losses": 0},
                     "patience": {"total": 0, "wins": 0, "losses": 0},
                     "lotto": {"total": 0, "wins": 0, "losses": 0}}
 
+    # Build entry time map from executions
+    entry_sql = "SELECT position_id, MIN(execution_time) as entry_time FROM executions WHERE side = 'BOT'"
+    entry_params: list = []
+    if filter_start:
+        entry_sql += " AND trade_date >= ?"
+        entry_params.append(filter_start)
+    if filter_end:
+        entry_sql += " AND trade_date <= ?"
+        entry_params.append(filter_end)
+    if filter_ticker:
+        entry_sql += " AND ticker = ?"
+        entry_params.append(filter_ticker.upper())
+    entry_sql += " GROUP BY position_id"
+    entry_times = {r["position_id"]: r["entry_time"] for r in conn.execute(entry_sql, entry_params).fetchall()}
+
     for e in all_events:
-        event_time = e.get("event_time", "")
+        # Use entry time for classification, fall back to event_time
+        pos_id = e.get("position_id", "")
+        event_time = entry_times.get(pos_id, e.get("event_time", ""))
         # Extract hour:minute from ISO timestamp
         try:
             if "T" in event_time:
@@ -212,6 +234,27 @@ async def trades_page(request: Request):
             time_buckets[bucket]["wins"] += 1
         elif e["realized_pnl"] < 0:
             time_buckets[bucket]["losses"] += 1
+
+    # Also count open positions (entries without exits) in time buckets
+    closed_position_ids = {e.get("position_id") for e in all_events}
+    for pos_id, etime in entry_times.items():
+        if pos_id in closed_position_ids:
+            continue  # already counted above
+        try:
+            if "T" in etime:
+                tp = etime.split("T")[1][:5]
+            else:
+                tp = etime[11:16] if len(etime) > 16 else ""
+            h, m = int(tp[:2]), int(tp[3:5])
+            mins = h * 60 + m
+        except (ValueError, IndexError):
+            continue
+        if mins < 600:
+            time_buckets["open"]["total"] += 1
+        elif mins >= 900:
+            time_buckets["lotto"]["total"] += 1
+        else:
+            time_buckets["patience"]["total"] += 1
 
     return templates.TemplateResponse("trades.html", {
         "request": request,
