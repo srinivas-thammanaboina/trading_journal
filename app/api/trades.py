@@ -61,38 +61,33 @@ async def get_trades_pnl(
     )
     ft_col = "e.fill_type" if has_fill_type else "NULL as fill_type"
 
-    # Build date/ticker filters (aliased for JOIN queries, plain for count)
-    where_r = ""
-    where_p = ""
-    where_plain = ""  # no table alias for count queries
-    params: list = []
-    count_params: list = []
+    # Build filter values list (one per filter, reused for each query part)
+    filter_vals: list = []
+    where_r = ""  # for realized_pnl_events aliased as r
+    where_e = ""  # for executions aliased as e
+    where_plain = ""  # no alias
 
     if date:
         where_r += " AND r.trade_date = ?"
-        where_p += " AND e.trade_date = ?"
+        where_e += " AND e.trade_date = ?"
         where_plain += " AND trade_date = ?"
-        params.extend([date, date])
-        count_params.extend([date, date])
+        filter_vals.append(date)
     else:
         if start:
             where_r += " AND r.trade_date >= ?"
-            where_p += " AND e.trade_date >= ?"
+            where_e += " AND e.trade_date >= ?"
             where_plain += " AND trade_date >= ?"
-            params.extend([start, start])
-            count_params.extend([start, start])
+            filter_vals.append(start)
         if end:
             where_r += " AND r.trade_date <= ?"
-            where_p += " AND e.trade_date <= ?"
+            where_e += " AND e.trade_date <= ?"
             where_plain += " AND trade_date <= ?"
-            params.extend([end, end])
-            count_params.extend([end, end])
+            filter_vals.append(end)
     if ticker:
         where_r += " AND r.ticker = ?"
-        where_p += " AND e.ticker = ?"
+        where_e += " AND e.ticker = ?"
         where_plain += " AND ticker = ?"
-        params.extend([ticker.upper(), ticker.upper()])
-        count_params.extend([ticker.upper(), ticker.upper()])
+        filter_vals.append(ticker.upper())
 
     # Closed trades from realized_pnl_events
     closed_sql = f"""SELECT r.event_time, r.event_type, r.position_id, r.ticker,
@@ -104,20 +99,21 @@ async def get_trades_pnl(
                     WHERE 1=1 {where_r}"""
 
     # Open positions from positions + entry executions
-    ft_col_open = "ent.fill_type" if has_fill_type else "NULL as fill_type"
+    ft_col_open = "e.fill_type" if has_fill_type else "NULL as fill_type"
     open_sql = f"""SELECT e.execution_time as event_time, 'OPEN' as event_type,
                           e.position_id, e.ticker, e.contract_symbol,
                           e.contracts as contracts_closed, e.fill_price as entry_price,
                           NULL as exit_price, NULL as realized_pnl, e.trade_date,
                           NULL as exit_reason, {ft_col_open}, 'open' as trade_status
                    FROM executions e
-                   LEFT JOIN executions ent ON ent.position_id = e.position_id AND ent.side = 'BOT'
                    WHERE e.side = 'BOT'
                      AND e.position_id IN (SELECT position_id FROM positions)
                      AND e.position_id NOT IN (SELECT position_id FROM realized_pnl_events)
-                     {where_p}"""
+                     {where_e}"""
 
     union_sql = f"SELECT * FROM ({closed_sql} UNION ALL {open_sql}) ORDER BY event_time DESC"
+    # params: filter_vals for closed part + filter_vals for open part
+    union_params = filter_vals + filter_vals
 
     # Count
     count_sql = f"""SELECT (SELECT COUNT(*) FROM realized_pnl_events WHERE 1=1 {where_plain})
@@ -125,13 +121,14 @@ async def get_trades_pnl(
                      AND position_id IN (SELECT position_id FROM positions)
                      AND position_id NOT IN (SELECT position_id FROM realized_pnl_events)
                      {where_plain}) as cnt"""
+    count_params = filter_vals + filter_vals
     total = conn.execute(count_sql, count_params).fetchone()["cnt"]
     total_pages = min(25, max(1, (min(total, 500) + per_page - 1) // per_page))
     page = min(page, total_pages) if total_pages > 0 else 1
     offset = (page - 1) * per_page
 
     final_sql = f"{union_sql} LIMIT {per_page} OFFSET {offset}"
-    rows = [dict(r) for r in conn.execute(final_sql, params + params).fetchall()]
+    rows = [dict(r) for r in conn.execute(final_sql, union_params).fetchall()]
 
     return {"trades": rows, "page": page, "total_pages": total_pages, "total": total}
 
