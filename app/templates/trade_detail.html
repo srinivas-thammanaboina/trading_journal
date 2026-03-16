@@ -46,6 +46,12 @@
         </div>
     </div>
     <div class="card">
+        <div class="label">Remaining</div>
+        <div class="value {{ 'positive' if summary.remaining > 0 else 'neutral' }}" style="font-size:1.2rem;">
+            {{ summary.remaining }} / {{ summary.contracts }}
+        </div>
+    </div>
+    <div class="card">
         <div class="label">Position ID</div>
         <div class="value neutral" style="font-size:0.85rem; word-break:break-all;">{{ summary.position_id }}</div>
     </div>
