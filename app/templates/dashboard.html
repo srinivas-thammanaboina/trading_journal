@@ -152,6 +152,32 @@
                 {% endif %}
             </tbody>
         </table>
+        {% if stock_positions %}
+        <div style="margin-top:1rem; padding:0.75rem 1rem; background:rgba(255,107,107,0.1); border:1px solid rgba(255,107,107,0.3); border-radius:6px;">
+            <div style="font-weight:600; color:var(--red); margin-bottom:0.5rem;">Stock Positions (Assignment)</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Direction</th>
+                        <th>Shares</th>
+                        <th>Avg Cost</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for sp in stock_positions %}
+                    <tr>
+                        <td><strong>{{ sp.symbol }}</strong></td>
+                        <td><span class="badge {{ 'badge-red' if sp.quantity < 0 else 'badge-green' }}">{{ 'SHORT' if sp.quantity < 0 else 'LONG' }}</span></td>
+                        <td>{{ sp.quantity|abs }}</td>
+                        <td>${{ "%.2f"|format(sp.avg_cost) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:0.5rem;">Close manually via IBKR Client Portal</div>
+        </div>
+        {% endif %}
     </div>
 
 </div>

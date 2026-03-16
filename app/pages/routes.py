@@ -101,6 +101,14 @@ async def dashboard(request: Request):
     # Bot uptime — derive from last system_state update
     last_updated = state["updated_at"] if state else None
 
+    # Stock positions (from assignments, etc.)
+    try:
+        stock_positions = [dict(r) for r in conn.execute(
+            "SELECT * FROM stock_positions WHERE closed = 0 ORDER BY symbol"
+        ).fetchall()]
+    except Exception:
+        stock_positions = []  # table may not exist yet
+
     # Daily P&L for equity curve
     daily_pnl = [dict(r) for r in conn.execute(
         """SELECT trade_date, SUM(realized_pnl) as total_pnl
@@ -121,6 +129,7 @@ async def dashboard(request: Request):
         "pos_summary": pos_summary,
         "last_updated": last_updated,
         "daily_pnl": daily_pnl,
+        "stock_positions": stock_positions,
     })
 
 
