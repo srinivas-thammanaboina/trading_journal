@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Trading Journal{% endblock %}</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=4">
+    <link rel="stylesheet" href="/static/css/style.css?v=5">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
     {% block head %}{% endblock %}
 </head>
@@ -32,11 +32,64 @@
 
         <!-- Main content -->
         <main class="main-content">
+            <div id="market-status" class="market-status-badge"></div>
             {% block content %}{% endblock %}
         </main>
     </div>
 
     <script src="/static/js/charts.js"></script>
+    <script>
+    function updateMarketStatus() {
+        const badge = document.getElementById('market-status');
+        if (!badge) return;
+
+        // Get current ET time
+        const now = new Date();
+        const etStr = now.toLocaleString('en-US', { timeZone: 'America/New_York' });
+        const et = new Date(etStr);
+        const day = et.getDay(); // 0=Sun, 6=Sat
+        const h = et.getHours();
+        const m = et.getMinutes();
+        const mins = h * 60 + m;
+
+        const OPEN = 9 * 60 + 30;   // 9:30
+        const CLOSE = 16 * 60;       // 4:00 PM
+        const PRE = 9 * 60;          // 9:00 AM
+
+        if (day === 0 || day === 6) {
+            badge.textContent = 'Market Closed';
+            badge.className = 'market-status-badge closed';
+        } else if (mins < PRE) {
+            badge.textContent = 'Pre-market';
+            badge.className = 'market-status-badge closed';
+        } else if (mins < OPEN) {
+            const left = OPEN - mins;
+            badge.textContent = 'Opens in ' + left + 'm';
+            badge.className = 'market-status-badge closing';
+        } else if (mins < CLOSE) {
+            const left = CLOSE - mins;
+            const hrs = Math.floor(left / 60);
+            const mn = left % 60;
+            let label = 'Closes in ';
+            if (hrs > 0) label += hrs + 'h ' + mn + 'm';
+            else label += mn + 'm';
+
+            badge.textContent = label;
+            if (left <= 15) {
+                badge.className = 'market-status-badge urgent';
+            } else if (left <= 60) {
+                badge.className = 'market-status-badge closing';
+            } else {
+                badge.className = 'market-status-badge open';
+            }
+        } else {
+            badge.textContent = 'Market Closed';
+            badge.className = 'market-status-badge closed';
+        }
+    }
+    updateMarketStatus();
+    setInterval(updateMarketStatus, 30000); // update every 30s
+    </script>
     {% block scripts %}{% endblock %}
 </body>
 </html>
