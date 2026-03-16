@@ -45,7 +45,7 @@ async def dashboard(request: Request):
     pos_count = conn.execute("SELECT COUNT(*) as cnt FROM positions").fetchone()
 
     health = {
-        "bot_running": state is not None,
+        "bot_running": bool(state["gateway_connected"]) if state and "gateway_connected" in state.keys() else state is not None,
         "daily_realized_pnl": state["daily_realized_pnl"] if state else 0.0,
         "daily_unrealized_pnl": state["daily_unrealized_pnl"] if state else 0.0,
         "halted": bool(state["halted"]) if state else False,
@@ -648,7 +648,7 @@ async def health_page(request: Request):
     pos_count = conn.execute("SELECT COUNT(*) as cnt FROM positions").fetchone()
 
     health = {
-        "bot_running": state is not None,
+        "bot_running": bool(state["gateway_connected"]) if state and "gateway_connected" in state.keys() else state is not None,
         "daily_realized_pnl": state["daily_realized_pnl"] if state else 0.0,
         "daily_unrealized_pnl": state["daily_unrealized_pnl"] if state else 0.0,
         "halted": bool(state["halted"]) if state else False,
