@@ -137,60 +137,6 @@
     </table>
 </div>
 
-<!-- Recent Guru Signals -->
-<div class="table-wrap" style="margin-top:1.5rem;">
-    <div class="table-header">Recent Guru Signals <span class="table-sub">Useful as a source audit, not just a trade log</span></div>
-    <table>
-        <thead>
-            <tr>
-                <th>Time</th>
-                <th>Source</th>
-                <th>Ticker</th>
-                <th>Action</th>
-                <th>Strike</th>
-                <th>R</th>
-                <th>Entry</th>
-                <th>Executed?</th>
-                <th>Outcome</th>
-                <th>Reason</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for s in signals %}
-            <tr>
-                <td style="white-space:nowrap;">{{ s.signal_time[5:16] if s.signal_time and s.signal_time|length > 16 else s.signal_time or '' }}</td>
-                <td><span class="badge {{ 'badge-blue' if s.source == 'telegram' else 'badge-purple' }}">{{ s.source }}</span></td>
-                <td><strong>{{ s.ticker }}</strong></td>
-                <td>
-                    {% if s.action == 'BUY' %}<span class="badge badge-green">buy</span>
-                    {% elif s.action in ('CLOSE', 'SELL') %}<span class="badge badge-red">close</span>
-                    {% elif s.action == 'PARTIAL_CLOSE' %}<span class="badge badge-yellow">partial</span>
-                    {% else %}<span class="badge badge-yellow">{{ s.action|lower }}</span>{% endif %}
-                </td>
-                <td>{{ "%.0f"|format(s.strike) if s.strike else '—' }}</td>
-                <td>{{ s.right or '—' }}</td>
-                <td>{{ "$%.2f"|format(s.entry_price) if s.entry_price else '—' }}</td>
-                <td>
-                    {% if s.we_executed %}<span class="badge badge-green">Yes</span>
-                    {% else %}<span class="badge badge-red">No</span>{% endif %}
-                </td>
-                <td>
-                    {% if s.our_outcome == 'filled' %}<span class="badge badge-green">filled</span>
-                    {% elif s.our_outcome == 'rejected' %}<span class="badge badge-red">rejected</span>
-                    {% else %}<span class="badge badge-muted">{{ s.our_outcome or '—' }}</span>{% endif %}
-                </td>
-                <td style="font-family:inherit; font-size:0.78rem; color:var(--text-secondary);">
-                    {{ s.our_reject_reason or '' }}
-                </td>
-            </tr>
-            {% endfor %}
-            {% if not signals %}
-            <tr><td colspan="10" style="text-align:center; color:var(--text-secondary); padding:2rem;">No guru signals recorded yet</td></tr>
-            {% endif %}
-        </tbody>
-    </table>
-</div>
-
 <!-- Win Rate by Ticker — Guru vs Bot Pie Charts -->
 {% if guru_pie or bot_pie %}
 <div class="two-col" style="margin-top:1.5rem; margin-bottom:1.5rem;">
@@ -260,6 +206,111 @@
     </div>
 </div>
 {% endif %}
+
+<!-- Recent Guru Signals (AJAX paginated) -->
+<div class="table-wrap" style="margin-top:1.5rem;" id="guru-signals-section">
+    <div class="table-header">Recent Guru Signals <span class="table-sub">Useful as a source audit, not just a trade log</span></div>
+    <table>
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Source</th>
+                <th>Ticker</th>
+                <th>Action</th>
+                <th>Strike</th>
+                <th>R</th>
+                <th>Entry</th>
+                <th>Executed?</th>
+                <th>Outcome</th>
+                <th>Reason</th>
+            </tr>
+        </thead>
+        <tbody id="guru-signals-body">
+            <tr><td colspan="10" style="text-align:center; color:var(--text-secondary); padding:2rem;">Loading...</td></tr>
+        </tbody>
+    </table>
+    <div id="guru-signals-pagination" style="display:flex; justify-content:center; align-items:center; gap:0.5rem; padding:0.75rem 1rem; border-top:1px solid var(--border);"></div>
+</div>
+
+<script>
+let currentSignalsPage = 1;
+
+function actionBadge(action) {
+    if (action === 'BUY') return '<span class="badge badge-green">buy</span>';
+    if (action === 'CLOSE' || action === 'SELL') return '<span class="badge badge-red">close</span>';
+    if (action === 'PARTIAL_CLOSE') return '<span class="badge badge-yellow">partial</span>';
+    return '<span class="badge badge-yellow">' + (action || '').toLowerCase() + '</span>';
+}
+
+function outcomeBadge(outcome) {
+    if (outcome === 'filled') return '<span class="badge badge-green">filled</span>';
+    if (outcome === 'rejected') return '<span class="badge badge-red">rejected</span>';
+    return '<span class="badge badge-muted">' + (outcome || '—') + '</span>';
+}
+
+function loadGuruSignals(page) {
+    currentSignalsPage = page;
+    const params = new URLSearchParams();
+    params.set('page', page);
+    {% if filter_start %}params.set('start', '{{ filter_start }}');{% endif %}
+    {% if filter_end %}params.set('end', '{{ filter_end }}');{% endif %}
+    {% if filter_ticker %}params.set('ticker', '{{ filter_ticker }}');{% endif %}
+
+    fetch('/api/guru/signals?' + params.toString())
+        .then(r => r.json())
+        .then(data => {
+            const tbody = document.getElementById('guru-signals-body');
+            if (!data.signals || data.signals.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-secondary);padding:2rem;">No guru signals recorded yet</td></tr>';
+            } else {
+                tbody.innerHTML = data.signals.map(s => {
+                    const time = s.signal_time ? s.signal_time.substring(5, 16) : '';
+                    const srcClass = s.source === 'telegram' ? 'badge-blue' : 'badge-purple';
+                    const strike = s.strike ? Math.round(s.strike) : '—';
+                    const entry = s.entry_price ? '$' + s.entry_price.toFixed(2) : '—';
+                    const executed = s.we_executed ? '<span class="badge badge-green">Yes</span>' : '<span class="badge badge-red">No</span>';
+                    return '<tr>' +
+                        '<td style="white-space:nowrap;">' + time + '</td>' +
+                        '<td><span class="badge ' + srcClass + '">' + s.source + '</span></td>' +
+                        '<td><strong>' + s.ticker + '</strong></td>' +
+                        '<td>' + actionBadge(s.action) + '</td>' +
+                        '<td>' + strike + '</td>' +
+                        '<td>' + (s.right || '—') + '</td>' +
+                        '<td>' + entry + '</td>' +
+                        '<td>' + executed + '</td>' +
+                        '<td>' + outcomeBadge(s.our_outcome) + '</td>' +
+                        '<td style="font-size:0.78rem;color:var(--text-secondary);">' + (s.our_reject_reason || '') + '</td>' +
+                        '</tr>';
+                }).join('');
+            }
+
+            // Pagination
+            const pag = document.getElementById('guru-signals-pagination');
+            if (data.total_pages <= 1) { pag.innerHTML = ''; return; }
+            let html = '';
+            if (data.page > 1) html += pgBtn(data.page - 1, '&laquo; Prev');
+            for (let p = 1; p <= data.total_pages; p++) {
+                if (p === data.page) {
+                    html += '<span style="padding:4px 10px;border:1px solid var(--accent);border-radius:4px;color:var(--accent);font-size:0.8rem;font-weight:600;">' + p + '</span>';
+                } else if (p <= 3 || p >= data.total_pages - 1 || Math.abs(p - data.page) <= 1) {
+                    html += pgBtn(p, p);
+                } else if (p === 4 || p === data.total_pages - 2) {
+                    html += '<span style="color:var(--text-muted);font-size:0.8rem;">...</span>';
+                }
+            }
+            if (data.page < data.total_pages) html += pgBtn(data.page + 1, 'Next &raquo;');
+            pag.innerHTML = html;
+        });
+}
+
+function pgBtn(page, label) {
+    return '<a href="#guru-signals-section" onclick="loadGuruSignals(' + page + ');return false;" ' +
+        'style="padding:4px 10px;border:1px solid var(--border);border-radius:4px;color:var(--text-secondary);text-decoration:none;font-size:0.8rem;cursor:pointer;">' + label + '</a>';
+}
+
+// Load page 1 on init
+loadGuruSignals(1);
+</script>
 
 {% if guru_pie or bot_pie %}
 <script>

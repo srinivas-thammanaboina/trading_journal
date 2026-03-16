@@ -4,20 +4,22 @@
 {% block content %}
 <div class="page-header">
     <h1 class="page-title">Trade History</h1>
-    <p class="page-subtitle">Journal now adds source, hold time, tags, and a drilldown summary</p>
+    <p class="page-subtitle">Performance breakdown by time of day, with drilldown and snapshot</p>
 </div>
 
 <div class="filters">
-    <form method="GET" action="/trades" style="display:flex; gap:0.75rem; flex-wrap:wrap;">
-        <input type="date" name="date" value="{{ filter_date or '' }}" placeholder="Date">
+    <form method="GET" action="/trades" style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
+        <input type="date" name="start" value="{{ filter_start or '' }}" title="Start date">
+        <span style="color:var(--text-muted);">to</span>
+        <input type="date" name="end" value="{{ filter_end or '' }}" title="End date">
         <input type="text" name="ticker" value="{{ filter_ticker or '' }}" placeholder="Ticker" style="width:80px;">
         <button type="submit">Filter</button>
         <a href="/trades" class="clear-link">Clear</a>
     </form>
 </div>
 
-{% if pnl_events %}
-<div class="card-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom:1rem;">
+<!-- Summary Cards -->
+<div class="card-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom:1rem;">
     <div class="card">
         <div class="label">Total P&L</div>
         <div class="value {{ 'positive' if total_pnl >= 0 else 'negative' }}">
@@ -27,17 +29,59 @@
     </div>
     <div class="card">
         <div class="label">Trades</div>
-        <div class="value neutral">{{ pnl_events|length }}</div>
+        <div class="value neutral">{{ total_trades }}</div>
+        <div class="sub muted">profit factor {{ "%.2f"|format(profit_factor) }}</div>
     </div>
     <div class="card">
         <div class="label">Win Rate</div>
         <div class="value neutral">{{ "%.0f"|format(win_rate) }}%</div>
-        <div class="sub muted">profit factor {{ "%.2f"|format(profit_factor) }}</div>
+    </div>
+    <div class="card">
+        <div class="label">Biggest Winner</div>
+        {% if biggest_winner %}
+        <div class="value positive">+${{ "%.0f"|format(biggest_winner.realized_pnl) }}</div>
+        <div class="sub muted">{{ biggest_winner.ticker }} {{ biggest_winner.contract_symbol[:20] if biggest_winner.contract_symbol else '' }}</div>
+        {% else %}
+        <div class="value muted">—</div>
+        {% endif %}
     </div>
 </div>
-{% endif %}
 
-<!-- Two-column: Trades Table + Snapshot Panel -->
+<!-- Time-of-Day Breakdown -->
+<div class="three-col" style="margin-bottom:1.5rem;">
+    <div class="card">
+        <div style="font-weight:600; margin-bottom:0.15rem;">Opening Trades</div>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:1rem;">9:30 – 10:00 AM ET</div>
+        <div style="height:160px; position:relative;">
+            <canvas id="openChart"></canvas>
+        </div>
+        <div style="text-align:center; margin-top:0.5rem; font-size:0.8rem; color:var(--text-secondary);">
+            {{ time_buckets.open.total }} trades · {{ time_buckets.open.wins }} W / {{ time_buckets.open.losses }} L
+        </div>
+    </div>
+    <div class="card">
+        <div style="font-weight:600; margin-bottom:0.15rem;">Patience Trades</div>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:1rem;">10:00 AM – 3:00 PM ET</div>
+        <div style="height:160px; position:relative;">
+            <canvas id="patienceChart"></canvas>
+        </div>
+        <div style="text-align:center; margin-top:0.5rem; font-size:0.8rem; color:var(--text-secondary);">
+            {{ time_buckets.patience.total }} trades · {{ time_buckets.patience.wins }} W / {{ time_buckets.patience.losses }} L
+        </div>
+    </div>
+    <div class="card">
+        <div style="font-weight:600; margin-bottom:0.15rem;">Lotto Trades</div>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:1rem;">3:00 – 4:15 PM ET</div>
+        <div style="height:160px; position:relative;">
+            <canvas id="lottoChart"></canvas>
+        </div>
+        <div style="text-align:center; margin-top:0.5rem; font-size:0.8rem; color:var(--text-secondary);">
+            {{ time_buckets.lotto.total }} trades · {{ time_buckets.lotto.wins }} W / {{ time_buckets.lotto.losses }} L
+        </div>
+    </div>
+</div>
+
+<!-- Two-column: Trades Table (AJAX) + Snapshot Panel -->
 <div style="display:grid; grid-template-columns:3fr 2fr; gap:1rem; align-items:start;">
 
     <!-- Trades Table -->
@@ -55,41 +99,11 @@
                     <th>P&L</th>
                 </tr>
             </thead>
-            <tbody>
-                {% for e in pnl_events %}
-                <tr class="clickable-row snapshot-row"
-                    data-position-id="{{ e.position_id }}"
-                    data-ticker="{{ e.ticker }}"
-                    data-contract="{{ e.contract_symbol }}"
-                    data-type="{{ e.event_type }}"
-                    data-entry="{{ '%.2f'|format(e.entry_price) }}"
-                    data-exit="{{ '%.2f'|format(e.exit_price) }}"
-                    data-qty="{{ e.contracts_closed }}"
-                    data-pnl="{{ '%.2f'|format(e.realized_pnl) }}"
-                    data-date="{{ e.trade_date }}"
-                    data-time="{{ e.event_time[11:19] if e.event_time and e.event_time|length > 19 else e.event_time or '' }}"
-                    onclick="showSnapshot(this)"
-                    ondblclick="window.location='/trade/{{ e.position_id }}'">
-                    <td>{{ e.trade_date }}</td>
-                    <td>{{ e.event_time[11:16] if e.event_time and e.event_time|length > 16 else e.event_time }}</td>
-                    <td>
-                        <span class="badge {{ 'badge-red' if 'CLOSE' in e.event_type else 'badge-yellow' }}">
-                            {{ e.event_type }}
-                        </span>
-                    </td>
-                    <td><strong>{{ e.ticker }}</strong> {{ e.contract_symbol }}</td>
-                    <td>${{ "%.2f"|format(e.entry_price) }}</td>
-                    <td>${{ "%.2f"|format(e.exit_price) }}</td>
-                    <td class="{{ 'pnl-positive' if e.realized_pnl > 0 else 'pnl-negative' if e.realized_pnl < 0 else 'pnl-zero' }}">
-                        {{ '+' if e.realized_pnl >= 0 }}${{ "%.2f"|format(e.realized_pnl) }}
-                    </td>
-                </tr>
-                {% endfor %}
-                {% if not pnl_events %}
-                <tr><td colspan="7" style="text-align:center; color:var(--text-secondary); padding:2rem;">No trades found</td></tr>
-                {% endif %}
+            <tbody id="trades-body">
+                <tr><td colspan="7" style="text-align:center; color:var(--text-secondary); padding:2rem;">Loading...</td></tr>
             </tbody>
         </table>
+        <div id="trades-pagination" style="display:flex; justify-content:center; align-items:center; gap:0.5rem; padding:0.75rem 1rem; border-top:1px solid var(--border);"></div>
     </div>
 
     <!-- Trade Snapshot Panel -->
@@ -101,33 +115,24 @@
         <div id="snapshotContent" style="display:none;">
             <div style="font-size:1.1rem; font-weight:700; margin-bottom:0.25rem;">Trade Snapshot</div>
             <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:1.25rem;">Selected trade</div>
-
             <div class="detail-grid" style="gap:0.6rem 1rem;">
                 <div class="detail-label">Contract</div>
                 <div class="detail-value" id="snap-contract" style="font-weight:600;"></div>
-
                 <div class="detail-label">Date</div>
                 <div class="detail-value" id="snap-date"></div>
-
                 <div class="detail-label">Type</div>
                 <div class="detail-value" id="snap-type"></div>
-
                 <div class="detail-label">Entry</div>
                 <div class="detail-value" id="snap-entry"></div>
-
                 <div class="detail-label">Exit</div>
                 <div class="detail-value" id="snap-exit"></div>
-
                 <div class="detail-label">Qty</div>
                 <div class="detail-value" id="snap-qty"></div>
-
                 <div class="detail-label">P&L</div>
                 <div class="detail-value" id="snap-pnl" style="font-weight:700; font-family:var(--font-mono);"></div>
-
                 <div class="detail-label">R Multiple</div>
                 <div class="detail-value" id="snap-rmult" style="font-family:var(--font-mono);"></div>
             </div>
-
             <div style="margin-top:1.5rem; padding-top:1rem; border-top:1px solid var(--border);">
                 <a id="snap-detail-link" href="#" style="color:var(--accent); text-decoration:none; font-size:0.85rem; font-weight:500;">
                     View full trade detail &rarr;
@@ -141,34 +146,133 @@
 
 {% block scripts %}
 <script>
+// Time-of-day bar charts
+function buildTimeChart(canvasId, total, wins, losses) {
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: ['Total', 'Wins', 'Losses'],
+            datasets: [{
+                data: [total, wins, losses],
+                backgroundColor: ['#58a6ff', '#3fb950', '#f85149'],
+                borderRadius: 4,
+                barPercentage: 0.6,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { grid: { display: false }, ticks: { color: '#8b949e', font: { size: 11 } } },
+                y: { beginAtZero: true, grid: { color: '#21262d' }, ticks: { color: '#6e7681', stepSize: 1, font: { size: 10 } } }
+            }
+        }
+    });
+}
+
+buildTimeChart('openChart', {{ time_buckets.open.total }}, {{ time_buckets.open.wins }}, {{ time_buckets.open.losses }});
+buildTimeChart('patienceChart', {{ time_buckets.patience.total }}, {{ time_buckets.patience.wins }}, {{ time_buckets.patience.losses }});
+buildTimeChart('lottoChart', {{ time_buckets.lotto.total }}, {{ time_buckets.lotto.wins }}, {{ time_buckets.lotto.losses }});
+
+// AJAX paginated trades
+function loadTrades(page) {
+    const params = new URLSearchParams();
+    params.set('page', page);
+    params.set('per_page', 20);
+    params.set('start', '{{ filter_start }}');
+    params.set('end', '{{ filter_end }}');
+    {% if filter_ticker %}params.set('ticker', '{{ filter_ticker }}');{% endif %}
+
+    fetch('/api/trades/pnl?' + params.toString())
+        .then(r => r.json())
+        .then(data => {
+            const tbody = document.getElementById('trades-body');
+            if (!data.trades || data.trades.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary);padding:2rem;">No trades found</td></tr>';
+            } else {
+                tbody.innerHTML = data.trades.map(e => {
+                    const time = e.event_time ? e.event_time.substring(11, 16) : '';
+                    const pnl = e.realized_pnl || 0;
+                    const pnlClass = pnl > 0 ? 'pnl-positive' : pnl < 0 ? 'pnl-negative' : 'pnl-zero';
+                    const pnlSign = pnl >= 0 ? '+' : '';
+                    const badgeClass = (e.event_type || '').includes('CLOSE') ? 'badge-red' : 'badge-yellow';
+                    return '<tr class="clickable-row snapshot-row" ' +
+                        'data-position-id="' + (e.position_id || '') + '" ' +
+                        'data-ticker="' + (e.ticker || '') + '" ' +
+                        'data-contract="' + (e.contract_symbol || '') + '" ' +
+                        'data-type="' + (e.event_type || '') + '" ' +
+                        'data-entry="' + (e.entry_price || 0).toFixed(2) + '" ' +
+                        'data-exit="' + (e.exit_price || 0).toFixed(2) + '" ' +
+                        'data-qty="' + (e.contracts_closed || 0) + '" ' +
+                        'data-pnl="' + pnl.toFixed(2) + '" ' +
+                        'data-date="' + (e.trade_date || '') + '" ' +
+                        'data-time="' + time + '" ' +
+                        'onclick="showSnapshot(this)" ' +
+                        'ondblclick="window.location=\'/trade/' + (e.position_id || '') + '\'">' +
+                        '<td>' + (e.trade_date || '') + '</td>' +
+                        '<td>' + time + '</td>' +
+                        '<td><span class="badge ' + badgeClass + '">' + (e.event_type || '') + '</span></td>' +
+                        '<td><strong>' + (e.ticker || '') + '</strong> ' + (e.contract_symbol || '') + '</td>' +
+                        '<td>$' + (e.entry_price || 0).toFixed(2) + '</td>' +
+                        '<td>$' + (e.exit_price || 0).toFixed(2) + '</td>' +
+                        '<td class="' + pnlClass + '">' + pnlSign + '$' + pnl.toFixed(2) + '</td>' +
+                        '</tr>';
+                }).join('');
+            }
+
+            // Pagination
+            const pag = document.getElementById('trades-pagination');
+            if (data.total_pages <= 1) { pag.innerHTML = ''; return; }
+            let html = '';
+            if (data.page > 1) html += tPgBtn(data.page - 1, '&laquo; Prev');
+            for (let p = 1; p <= data.total_pages; p++) {
+                if (p === data.page) {
+                    html += '<span style="padding:4px 10px;border:1px solid var(--accent);border-radius:4px;color:var(--accent);font-size:0.8rem;font-weight:600;">' + p + '</span>';
+                } else if (p <= 3 || p >= data.total_pages - 1 || Math.abs(p - data.page) <= 1) {
+                    html += tPgBtn(p, p);
+                } else if (p === 4 || p === data.total_pages - 2) {
+                    html += '<span style="color:var(--text-muted);font-size:0.8rem;">...</span>';
+                }
+            }
+            if (data.page < data.total_pages) html += tPgBtn(data.page + 1, 'Next &raquo;');
+            pag.innerHTML = html;
+        });
+}
+
+function tPgBtn(page, label) {
+    return '<a href="#" onclick="loadTrades(' + page + ');return false;" ' +
+        'style="padding:4px 10px;border:1px solid var(--border);border-radius:4px;color:var(--text-secondary);text-decoration:none;font-size:0.8rem;cursor:pointer;">' + label + '</a>';
+}
+
+loadTrades(1);
+
+// Snapshot
 function showSnapshot(row) {
-    // Remove highlight from all rows
     document.querySelectorAll('.snapshot-row').forEach(r => r.classList.remove('snapshot-active'));
     row.classList.add('snapshot-active');
 
     document.getElementById('snapshotEmpty').style.display = 'none';
     document.getElementById('snapshotContent').style.display = 'block';
 
-    const ticker = row.dataset.ticker;
-    const contract = row.dataset.contract;
     const entry = parseFloat(row.dataset.entry);
     const exit = parseFloat(row.dataset.exit);
     const pnl = parseFloat(row.dataset.pnl);
-    const qty = parseInt(row.dataset.qty);
 
-    document.getElementById('snap-contract').textContent = contract;
+    document.getElementById('snap-contract').textContent = row.dataset.contract;
     document.getElementById('snap-date').textContent = row.dataset.date + ' ' + row.dataset.time;
     document.getElementById('snap-type').textContent = row.dataset.type;
     document.getElementById('snap-entry').textContent = '$' + entry.toFixed(2);
     document.getElementById('snap-exit').textContent = '$' + exit.toFixed(2);
-    document.getElementById('snap-qty').textContent = qty;
+    document.getElementById('snap-qty').textContent = row.dataset.qty;
 
     const pnlEl = document.getElementById('snap-pnl');
     pnlEl.textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
     pnlEl.style.color = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--text-secondary)';
 
-    // R multiple: pnl per contract / risk per contract (entry - stop ≈ entry * 0.5 as rough estimate)
-    const riskPerContract = entry * 100;  // cost of one contract
+    const riskPerContract = entry * 100;
     const pnlPerContract = (exit - entry) * 100;
     const rMult = riskPerContract > 0 ? (pnlPerContract / riskPerContract).toFixed(1) : '—';
     const rmultEl = document.getElementById('snap-rmult');

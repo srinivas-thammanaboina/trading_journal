@@ -131,41 +131,92 @@ async def trades_page(request: Request):
         return redirect
 
     conn = get_db()
-    filter_date = request.query_params.get("date", "")
+    filter_start = request.query_params.get("start", "")
+    filter_end = request.query_params.get("end", "")
     filter_ticker = request.query_params.get("ticker", "")
 
-    sql = "SELECT * FROM realized_pnl_events WHERE 1=1"
-    params: list = []
+    # Default to latest trading day if no filters
+    if not filter_start and not filter_end:
+        latest = conn.execute(
+            "SELECT MAX(trade_date) as d FROM realized_pnl_events"
+        ).fetchone()
+        if latest and latest["d"]:
+            filter_start = latest["d"]
+            filter_end = latest["d"]
 
-    if filter_date:
-        sql += " AND trade_date = ?"
-        params.append(filter_date)
-
+    # All P&L events for summary cards
+    all_sql = "SELECT * FROM realized_pnl_events WHERE 1=1"
+    all_params: list = []
+    if filter_start:
+        all_sql += " AND trade_date >= ?"
+        all_params.append(filter_start)
+    if filter_end:
+        all_sql += " AND trade_date <= ?"
+        all_params.append(filter_end)
     if filter_ticker:
-        sql += " AND ticker = ?"
-        params.append(filter_ticker.upper())
+        all_sql += " AND ticker = ?"
+        all_params.append(filter_ticker.upper())
+    all_sql += " ORDER BY event_time DESC"
+    all_events = [dict(r) for r in conn.execute(all_sql, all_params).fetchall()]
 
-    sql += " ORDER BY event_time DESC LIMIT 200"
-    pnl_events = [dict(r) for r in conn.execute(sql, params).fetchall()]
-
-    # Compute summary
-    total_pnl = sum(e["realized_pnl"] for e in pnl_events)
-    wins_list = [e["realized_pnl"] for e in pnl_events if e["realized_pnl"] > 0]
-    losses_list = [e["realized_pnl"] for e in pnl_events if e["realized_pnl"] < 0]
-    total = len(pnl_events)
+    # Summary stats
+    total_pnl = sum(e["realized_pnl"] for e in all_events)
+    wins_list = [e["realized_pnl"] for e in all_events if e["realized_pnl"] > 0]
+    losses_list = [e["realized_pnl"] for e in all_events if e["realized_pnl"] < 0]
+    total = len(all_events)
     win_rate = (len(wins_list) / total * 100) if total > 0 else 0
     expectancy = (total_pnl / total) if total > 0 else 0
     profit_factor = (sum(wins_list) / abs(sum(losses_list))) if losses_list else 0.0
 
+    # Biggest winner and loser
+    biggest_winner = max(all_events, key=lambda e: e["realized_pnl"]) if all_events else None
+    biggest_loser = min(all_events, key=lambda e: e["realized_pnl"]) if all_events else None
+
+    # Time-of-day breakdown
+    # Open: 9:30-10:00, Patience: 10:00-15:00, Lotto: 15:00-16:15
+    time_buckets = {"open": {"total": 0, "wins": 0, "losses": 0},
+                    "patience": {"total": 0, "wins": 0, "losses": 0},
+                    "lotto": {"total": 0, "wins": 0, "losses": 0}}
+
+    for e in all_events:
+        event_time = e.get("event_time", "")
+        # Extract hour:minute from ISO timestamp
+        try:
+            if "T" in event_time:
+                time_part = event_time.split("T")[1][:5]
+            else:
+                time_part = event_time[11:16] if len(event_time) > 16 else ""
+            h, m = int(time_part[:2]), int(time_part[3:5])
+            mins = h * 60 + m
+        except (ValueError, IndexError):
+            continue
+
+        if mins < 600:  # before 10:00 AM
+            bucket = "open"
+        elif mins >= 900:  # after 3:00 PM
+            bucket = "lotto"
+        else:
+            bucket = "patience"
+
+        time_buckets[bucket]["total"] += 1
+        if e["realized_pnl"] > 0:
+            time_buckets[bucket]["wins"] += 1
+        elif e["realized_pnl"] < 0:
+            time_buckets[bucket]["losses"] += 1
+
     return templates.TemplateResponse("trades.html", {
         "request": request,
         "active_page": "trades",
-        "pnl_events": pnl_events,
         "total_pnl": total_pnl,
         "win_rate": win_rate,
         "expectancy": expectancy,
         "profit_factor": profit_factor,
-        "filter_date": filter_date,
+        "biggest_winner": biggest_winner,
+        "biggest_loser": biggest_loser,
+        "time_buckets": time_buckets,
+        "total_trades": total,
+        "filter_start": filter_start,
+        "filter_end": filter_end,
         "filter_ticker": filter_ticker,
     })
 
@@ -210,28 +261,40 @@ async def alerts_page(request: Request):
         return redirect
 
     conn = get_db()
-    filter_date = request.query_params.get("date", "")
+    filter_start = request.query_params.get("start", "")
+    filter_end = request.query_params.get("end", "")
     filter_outcome = request.query_params.get("outcome", "")
 
-    # Use today if no date filter
-    target_date = filter_date or date.today().isoformat()
+    # Default to latest day with alerts, or today
+    if not filter_start and not filter_end:
+        latest = conn.execute("SELECT MAX(trade_date) as d FROM alerts").fetchone()
+        if latest and latest["d"]:
+            filter_start = latest["d"]
+            filter_end = latest["d"]
+        else:
+            filter_start = date.today().isoformat()
+            filter_end = filter_start
+
+    # Build date clause
+    date_clause = ""
+    date_params: list = []
+    if filter_start:
+        date_clause += " AND trade_date >= ?"
+        date_params.append(filter_start)
+    if filter_end:
+        date_clause += " AND trade_date <= ?"
+        date_params.append(filter_end)
+
+    def count_alerts(extra_clause: str = "", extra_params: list | None = None) -> int:
+        sql = f"SELECT COUNT(*) as c FROM alerts WHERE 1=1{date_clause}{extra_clause}"
+        return conn.execute(sql, date_params + (extra_params or [])).fetchone()["c"]
 
     # Pipeline funnel counts
-    total = conn.execute(
-        "SELECT COUNT(*) as c FROM alerts WHERE trade_date = ?", (target_date,)
-    ).fetchone()["c"]
-    parsed = conn.execute(
-        "SELECT COUNT(*) as c FROM alerts WHERE trade_date = ? AND parse_result = 'signal'", (target_date,)
-    ).fetchone()["c"]
-    approved = conn.execute(
-        "SELECT COUNT(*) as c FROM alerts WHERE trade_date = ? AND risk_result = 'approved'", (target_date,)
-    ).fetchone()["c"]
-    filled = conn.execute(
-        "SELECT COUNT(*) as c FROM alerts WHERE trade_date = ? AND outcome = 'filled'", (target_date,)
-    ).fetchone()["c"]
-    rejected = conn.execute(
-        "SELECT COUNT(*) as c FROM alerts WHERE trade_date = ? AND outcome = 'rejected'", (target_date,)
-    ).fetchone()["c"]
+    total = count_alerts()
+    parsed = count_alerts(" AND parse_result = 'signal'")
+    approved = count_alerts(" AND risk_result = 'approved'")
+    filled = count_alerts(" AND outcome = 'filled'")
+    rejected = count_alerts(" AND outcome = 'rejected'")
 
     pipeline = {
         "total": total,
@@ -244,15 +307,9 @@ async def alerts_page(request: Request):
     }
 
     # Parse quality diagnostic
-    ignored_commentary = conn.execute(
-        "SELECT COUNT(*) as c FROM alerts WHERE trade_date = ? AND parse_result = 'non_actionable'", (target_date,)
-    ).fetchone()["c"]
-    parse_errors = conn.execute(
-        "SELECT COUNT(*) as c FROM alerts WHERE trade_date = ? AND parse_result = 'error'", (target_date,)
-    ).fetchone()["c"]
-    duplicates = conn.execute(
-        "SELECT COUNT(*) as c FROM alerts WHERE trade_date = ? AND outcome = 'duplicate'", (target_date,)
-    ).fetchone()["c"]
+    ignored_commentary = count_alerts(" AND parse_result = 'non_actionable'")
+    parse_errors = count_alerts(" AND parse_result = 'error'")
+    duplicates = count_alerts(" AND outcome = 'duplicate'")
     parse_quality = [
         ("Parsed OK", parsed),
         ("Ignored commentary", ignored_commentary),
@@ -262,10 +319,10 @@ async def alerts_page(request: Request):
 
     # Risk outcome diagnostic
     reason_rows = conn.execute(
-        """SELECT risk_reason, COUNT(*) as cnt FROM alerts
-           WHERE trade_date = ? AND risk_reason IS NOT NULL
+        f"""SELECT risk_reason, COUNT(*) as cnt FROM alerts
+           WHERE 1=1{date_clause} AND risk_reason IS NOT NULL
            GROUP BY risk_reason ORDER BY cnt DESC""",
-        (target_date,),
+        date_params,
     ).fetchall()
     risk_outcome = [("Approved", approved)]
     for r in reason_rows:
@@ -274,13 +331,11 @@ async def alerts_page(request: Request):
     # Broker outcome diagnostic
     broker_outcome = []
     for status, label in [("filled", "Filled"), ("rejected", "Rejected"), ("duplicate", "Duplicate"), ("ignored", "Ignored"), ("parse_error", "Parse error")]:
-        cnt = conn.execute(
-            "SELECT COUNT(*) as c FROM alerts WHERE trade_date = ? AND outcome = ?", (target_date, status)
-        ).fetchone()["c"]
+        cnt = count_alerts(" AND outcome = ?", [status])
         if cnt > 0:
             broker_outcome.append((label, cnt))
 
-    # Reject reasons (keep for dedicated section)
+    # Reject reasons
     reject_reasons = {r["risk_reason"]: r["cnt"] for r in reason_rows if r["risk_reason"]}
 
     # System notes (auto-generated from data)
@@ -311,26 +366,19 @@ async def alerts_page(request: Request):
     if parse_errors > 0:
         notes.append(f"{parse_errors} parse failures — check logs for malformed alerts")
 
-    # Alerts list
-    sql = "SELECT * FROM alerts WHERE trade_date = ?"
-    params: list = [target_date]
-    if filter_outcome:
-        sql += " AND outcome = ?"
-        params.append(filter_outcome)
-    sql += " ORDER BY alert_time DESC LIMIT 100"
-    alerts = [dict(r) for r in conn.execute(sql, params).fetchall()]
+    # Alert audit loaded via AJAX (/api/alerts)
 
     return templates.TemplateResponse("alerts.html", {
         "request": request,
         "active_page": "alerts",
-        "alerts": alerts,
         "pipeline": pipeline,
         "parse_quality": parse_quality,
         "risk_outcome": risk_outcome,
         "broker_outcome": broker_outcome,
         "reject_reasons": reject_reasons,
         "notes": notes,
-        "filter_date": filter_date,
+        "filter_start": filter_start,
+        "filter_end": filter_end,
         "filter_outcome": filter_outcome,
     })
 
@@ -593,21 +641,7 @@ async def guru_page(request: Request):
             "bot_win_rate": round(b["wins"] / b["trades"] * 100, 1) if b["trades"] else 0.0,
         })
 
-    # Recent signals
-    s_sql = "SELECT * FROM guru_signals WHERE 1=1"
-    s_params: list = []
-    if filter_start:
-        s_sql += " AND trade_date >= ?"
-        s_params.append(filter_start)
-    if filter_end:
-        s_sql += " AND trade_date <= ?"
-        s_params.append(filter_end)
-    if filter_ticker:
-        s_sql += " AND ticker = ?"
-        s_params.append(filter_ticker)
-    s_sql += " ORDER BY signal_time DESC LIMIT 100"
-
-    signals = [dict(r) for r in conn.execute(s_sql, s_params).fetchall()]
+    # Recent signals loaded via AJAX (/api/guru/signals) — no server-side query needed
 
     # Bot totals for execution quality panel
     bot_total_pnl = sum(b["pnl"] for b in bot_by_ticker.values())
@@ -621,20 +655,20 @@ async def guru_page(request: Request):
         WHERE our_outcome != 'skipped'
         ORDER BY ticker, signal_time
     """
-    guru_sup_rows = conn.execute(guru_supported_sql).fetchall()
+    guru_sup_rows = [dict(r) for r in conn.execute(guru_supported_sql).fetchall()]
     guru_open: dict = {}  # key: (ticker, strike, right) → entry
     guru_ticker_stats: dict = {}
 
     for r in guru_sup_rows:
-        t = r["ticker"]
+        t = r.get("ticker")
         if not t:
             continue
         if t not in guru_ticker_stats:
             guru_ticker_stats[t] = {"wins": 0, "losses": 0}
 
-        action = (r["action"] or "").upper()
-        strike = r["strike"]
-        right = r["right"]
+        action = (r.get("action") or "").upper()
+        strike = r.get("strike")
+        right = r.get("right")
         key = (t, strike, right)
 
         if action == "BUY" and r.get("entry_price"):
@@ -718,7 +752,6 @@ async def guru_page(request: Request):
         "active_page": "guru",
         "guru_stats": guru_stats,
         "comparison": comparison,
-        "signals": signals,
         "available_tickers": available_tickers,
         "filter_start": filter_start,
         "filter_end": filter_end,

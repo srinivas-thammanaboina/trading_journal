@@ -13,26 +13,39 @@ async def guru_signals(
     end: str | None = Query(None),
     ticker: str | None = Query(None),
     action: str | None = Query(None),
-    limit: int = Query(200, ge=1, le=1000),
+    page: int = Query(1, ge=1, le=25),
+    per_page: int = Query(20, ge=1, le=50),
 ):
     conn = get_db()
     sql = "SELECT * FROM guru_signals WHERE 1=1"
+    count_sql = "SELECT COUNT(*) as cnt FROM guru_signals WHERE 1=1"
     params: list = []
     if start:
         sql += " AND trade_date >= ?"
+        count_sql += " AND trade_date >= ?"
         params.append(start)
     if end:
         sql += " AND trade_date <= ?"
+        count_sql += " AND trade_date <= ?"
         params.append(end)
     if ticker:
         sql += " AND ticker = ?"
+        count_sql += " AND ticker = ?"
         params.append(ticker.upper())
     if action:
         sql += " AND action = ?"
+        count_sql += " AND action = ?"
         params.append(action.upper())
-    sql += " ORDER BY signal_time DESC LIMIT ?"
-    params.append(limit)
-    return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+    total = conn.execute(count_sql, params).fetchone()["cnt"]
+    total_pages = min(25, max(1, (min(total, 500) + per_page - 1) // per_page))
+    page = min(page, total_pages)
+    offset = (page - 1) * per_page
+
+    sql += f" ORDER BY signal_time DESC LIMIT {per_page} OFFSET {offset}"
+    rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+    return {"signals": rows, "page": page, "total_pages": total_pages, "total": total}
 
 
 @router.get("/stats")
