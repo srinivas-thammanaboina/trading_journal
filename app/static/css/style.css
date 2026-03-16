@@ -333,6 +333,10 @@ tbody tr:hover { background: rgba(88, 166, 255, 0.03); }
     grid-template-columns: 2fr 1fr;
     gap: 1rem;
     margin-bottom: 1.5rem;
+    align-items: stretch;
+}
+.chart-row > * {
+    min-height: 100%;
 }
 
 /* ── Pipeline funnel ──────────────────────────────── */
