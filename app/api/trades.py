@@ -52,36 +52,45 @@ async def get_trades_pnl(
     page: int = Query(1, ge=1, le=25),
     per_page: int = Query(20, ge=1, le=50),
 ):
-    """Paginated realized P&L events for trades table."""
+    """Paginated realized P&L events for trades table, with fill_type from executions."""
     conn = get_db()
-    sql = "SELECT * FROM realized_pnl_events WHERE 1=1"
+    # Left join executions to get fill_type for the exit (SLD side, matching position_id)
+    sql = """SELECT r.*, e.fill_type
+             FROM realized_pnl_events r
+             LEFT JOIN executions e ON e.position_id = r.position_id AND e.side = 'SLD'
+             WHERE 1=1"""
     count_sql = "SELECT COUNT(*) as cnt FROM realized_pnl_events WHERE 1=1"
     params: list = []
+    count_params: list = []
 
     if date:
-        sql += " AND trade_date = ?"
+        sql += " AND r.trade_date = ?"
         count_sql += " AND trade_date = ?"
         params.append(date)
+        count_params.append(date)
     else:
         if start:
-            sql += " AND trade_date >= ?"
+            sql += " AND r.trade_date >= ?"
             count_sql += " AND trade_date >= ?"
             params.append(start)
+            count_params.append(start)
         if end:
-            sql += " AND trade_date <= ?"
+            sql += " AND r.trade_date <= ?"
             count_sql += " AND trade_date <= ?"
             params.append(end)
+            count_params.append(end)
     if ticker:
-        sql += " AND ticker = ?"
+        sql += " AND r.ticker = ?"
         count_sql += " AND ticker = ?"
         params.append(ticker.upper())
+        count_params.append(ticker.upper())
 
-    total = conn.execute(count_sql, params).fetchone()["cnt"]
+    total = conn.execute(count_sql, count_params).fetchone()["cnt"]
     total_pages = min(25, max(1, (min(total, 500) + per_page - 1) // per_page))
     page = min(page, total_pages) if total_pages > 0 else 1
     offset = (page - 1) * per_page
 
-    sql += f" ORDER BY event_time DESC LIMIT {per_page} OFFSET {offset}"
+    sql += f" ORDER BY r.event_time DESC LIMIT {per_page} OFFSET {offset}"
     rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
 
     return {"trades": rows, "page": page, "total_pages": total_pages, "total": total}

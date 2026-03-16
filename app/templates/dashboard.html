@@ -51,7 +51,9 @@
     <div class="chart-container" style="height:300px;">
         <div class="chart-title">Equity Curve</div>
         <div class="chart-sub">Cumulative P&L — last 30 days</div>
-        <canvas id="equityChart"></canvas>
+        <div style="position:relative; height:240px;">
+            <canvas id="equityChart"></canvas>
+        </div>
     </div>
     <div class="chart-container" style="height:300px;">
         <div class="chart-title">P&L by Day</div>
@@ -74,6 +76,7 @@
                     <th>Contract</th>
                     <th>Source</th>
                     <th>Side</th>
+                    <th>Fill</th>
                     <th>Qty</th>
                     <th>Price</th>
                     <th>P&L</th>
@@ -96,6 +99,11 @@
                             {% if t.side == 'BOT' %}entry{% else %}close{% endif %}
                         </span>
                     </td>
+                    <td>
+                        {% set ft = t.fill_type or '—' %}
+                        {% set ft_colors = {'limit': 'var(--green)', 'market': 'var(--yellow)', 'reconciled': '#ff8c00', 'partial': 'var(--accent)', 'auto_close': '#ff6b6b'} %}
+                        <span style="color:{{ ft_colors.get(ft, 'var(--text-secondary)') }};font-size:0.75rem;font-weight:600;">{{ ft }}</span>
+                    </td>
                     <td>{{ t.contracts }}</td>
                     <td>${{ "%.2f"|format(t.fill_price) }}</td>
                     <td class="{{ 'pnl-positive' if (t.pnl or 0) > 0 else 'pnl-negative' if (t.pnl or 0) < 0 else 'pnl-zero' }}">
@@ -104,7 +112,7 @@
                 </tr>
                 {% endfor %}
                 {% if not recent_trades %}
-                <tr><td colspan="7" style="text-align:center; color:var(--text-secondary); padding:1.5rem;">No recent trades</td></tr>
+                <tr><td colspan="8" style="text-align:center; color:var(--text-secondary); padding:1.5rem;">No recent trades</td></tr>
                 {% endif %}
             </tbody>
         </table>

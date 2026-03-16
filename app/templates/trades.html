@@ -93,6 +93,7 @@
                     <th>Date</th>
                     <th>Time</th>
                     <th>Type</th>
+                    <th>Fill</th>
                     <th>Contract</th>
                     <th>Entry</th>
                     <th>Exit</th>
@@ -122,6 +123,8 @@
                 <div class="detail-value" id="snap-date"></div>
                 <div class="detail-label">Type</div>
                 <div class="detail-value" id="snap-type"></div>
+                <div class="detail-label">Fill Type</div>
+                <div class="detail-value" id="snap-fill-type"></div>
                 <div class="detail-label">Entry</div>
                 <div class="detail-value" id="snap-entry"></div>
                 <div class="detail-label">Exit</div>
@@ -191,7 +194,7 @@ function loadTrades(page) {
         .then(data => {
             const tbody = document.getElementById('trades-body');
             if (!data.trades || data.trades.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary);padding:2rem;">No trades found</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary);padding:2rem;">No trades found</td></tr>';
             } else {
                 tbody.innerHTML = data.trades.map(e => {
                     const time = e.event_time ? e.event_time.substring(11, 16) : '';
@@ -199,11 +202,15 @@ function loadTrades(page) {
                     const pnlClass = pnl > 0 ? 'pnl-positive' : pnl < 0 ? 'pnl-negative' : 'pnl-zero';
                     const pnlSign = pnl >= 0 ? '+' : '';
                     const badgeClass = (e.event_type || '').includes('CLOSE') ? 'badge-red' : 'badge-yellow';
+                    const ft = e.fill_type || '—';
+                    const ftColors = {limit: 'var(--green)', market: 'var(--yellow)', reconciled: '#ff8c00', partial: 'var(--accent)', auto_close: '#ff6b6b'};
+                    const ftColor = ftColors[ft] || 'var(--text-secondary)';
                     return '<tr class="clickable-row snapshot-row" ' +
                         'data-position-id="' + (e.position_id || '') + '" ' +
                         'data-ticker="' + (e.ticker || '') + '" ' +
                         'data-contract="' + (e.contract_symbol || '') + '" ' +
                         'data-type="' + (e.event_type || '') + '" ' +
+                        'data-fill-type="' + ft + '" ' +
                         'data-entry="' + (e.entry_price || 0).toFixed(2) + '" ' +
                         'data-exit="' + (e.exit_price || 0).toFixed(2) + '" ' +
                         'data-qty="' + (e.contracts_closed || 0) + '" ' +
@@ -215,6 +222,7 @@ function loadTrades(page) {
                         '<td>' + (e.trade_date || '') + '</td>' +
                         '<td>' + time + '</td>' +
                         '<td><span class="badge ' + badgeClass + '">' + (e.event_type || '') + '</span></td>' +
+                        '<td><span style="color:' + ftColor + ';font-size:0.75rem;font-weight:600;">' + ft + '</span></td>' +
                         '<td><strong>' + (e.ticker || '') + '</strong> ' + (e.contract_symbol || '') + '</td>' +
                         '<td>$' + (e.entry_price || 0).toFixed(2) + '</td>' +
                         '<td>$' + (e.exit_price || 0).toFixed(2) + '</td>' +
@@ -264,6 +272,11 @@ function showSnapshot(row) {
     document.getElementById('snap-contract').textContent = row.dataset.contract;
     document.getElementById('snap-date').textContent = row.dataset.date + ' ' + row.dataset.time;
     document.getElementById('snap-type').textContent = row.dataset.type;
+    const fillType = row.dataset.fillType || '—';
+    const ftEl = document.getElementById('snap-fill-type');
+    ftEl.textContent = fillType;
+    const ftColorMap = {limit: 'var(--green)', market: 'var(--yellow)', reconciled: '#ff8c00', partial: 'var(--accent)', auto_close: '#ff6b6b'};
+    ftEl.style.color = ftColorMap[fillType] || 'var(--text-secondary)';
     document.getElementById('snap-entry').textContent = '$' + entry.toFixed(2);
     document.getElementById('snap-exit').textContent = '$' + exit.toFixed(2);
     document.getElementById('snap-qty').textContent = row.dataset.qty;
