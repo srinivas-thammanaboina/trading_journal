@@ -90,12 +90,19 @@ async def get_trades_pnl(
         filter_vals.append(ticker.upper())
 
     # Closed trades from realized_pnl_events
+    # Use subquery to get fill_type for the closest SLD execution by time
+    if has_fill_type:
+        ft_subq = f"""(SELECT e2.fill_type FROM executions e2
+                       WHERE e2.position_id = r.position_id AND e2.side = 'SLD'
+                       ORDER BY ABS(julianday(e2.execution_time) - julianday(r.event_time))
+                       LIMIT 1) as fill_type"""
+    else:
+        ft_subq = "NULL as fill_type"
     closed_sql = f"""SELECT r.event_time, r.event_type, r.position_id, r.ticker,
                            r.contract_symbol, r.contracts_closed, r.entry_price,
                            r.exit_price, r.realized_pnl, r.trade_date, r.exit_reason,
-                           {ft_col}, 'closed' as trade_status
+                           {ft_subq}, 'closed' as trade_status
                     FROM realized_pnl_events r
-                    LEFT JOIN executions e ON e.position_id = r.position_id AND e.side = 'SLD'
                     WHERE 1=1 {where_r}"""
 
     # Open positions from positions + entry executions
