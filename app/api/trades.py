@@ -90,33 +90,26 @@ async def get_trades_pnl(
         filter_vals.append(ticker.upper())
 
     # Closed trades from realized_pnl_events
-    # Use subquery to get fill_type for the closest SLD execution by time
-    if has_fill_type:
-        ft_subq = f"""(SELECT e2.fill_type FROM executions e2
-                       WHERE e2.position_id = r.position_id AND e2.side = 'SLD'
-                       ORDER BY ABS(julianday(e2.execution_time) - julianday(r.event_time))
-                       LIMIT 1) as fill_type"""
-    else:
-        ft_subq = "NULL as fill_type"
-    closed_sql = f"""SELECT r.event_time, r.event_type, r.position_id, r.ticker,
-                           r.contract_symbol, r.contracts_closed, r.entry_price,
-                           r.exit_price, r.realized_pnl, r.trade_date, r.exit_reason,
-                           {ft_subq}, 'closed' as trade_status
-                    FROM realized_pnl_events r
-                    WHERE 1=1 {where_r}"""
+    # Use exit_reason as fill_type (already captures partial_profit, auto_close, guru_close, etc.)
+    closed_sql = f"""SELECT event_time, event_type, position_id, ticker,
+                           contract_symbol, contracts_closed, entry_price,
+                           exit_price, realized_pnl, trade_date, exit_reason,
+                           exit_reason as fill_type, 'closed' as trade_status
+                    FROM realized_pnl_events
+                    WHERE 1=1 {where_r.replace('r.', '')}"""
 
     # Open positions from positions + entry executions
-    ft_col_open = "e.fill_type" if has_fill_type else "NULL as fill_type"
-    open_sql = f"""SELECT e.execution_time as event_time, 'OPEN' as event_type,
-                          e.position_id, e.ticker, e.contract_symbol,
-                          e.contracts as contracts_closed, e.fill_price as entry_price,
-                          NULL as exit_price, NULL as realized_pnl, e.trade_date,
+    ft_col_open = "fill_type" if has_fill_type else "NULL as fill_type"
+    open_sql = f"""SELECT execution_time as event_time, 'OPEN' as event_type,
+                          position_id, ticker, contract_symbol,
+                          contracts as contracts_closed, fill_price as entry_price,
+                          NULL as exit_price, NULL as realized_pnl, trade_date,
                           NULL as exit_reason, {ft_col_open}, 'open' as trade_status
-                   FROM executions e
-                   WHERE e.side = 'BOT'
-                     AND e.position_id IN (SELECT position_id FROM positions)
-                     AND e.position_id NOT IN (SELECT position_id FROM realized_pnl_events)
-                     {where_e}"""
+                   FROM executions
+                   WHERE side = 'BOT'
+                     AND position_id IN (SELECT position_id FROM positions)
+                     AND position_id NOT IN (SELECT position_id FROM realized_pnl_events)
+                     {where_e.replace('e.', '')}"""
 
     union_sql = f"SELECT * FROM ({closed_sql} UNION ALL {open_sql}) ORDER BY event_time DESC"
     # params: filter_vals for closed part + filter_vals for open part
