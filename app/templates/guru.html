@@ -191,6 +191,26 @@
     </table>
 </div>
 
+<!-- Win Rate by Ticker — Guru vs Bot Pie Charts -->
+{% if guru_pie or bot_pie %}
+<div class="two-col" style="margin-top:1.5rem; margin-bottom:1.5rem;">
+    <div class="card">
+        <div style="font-weight:600; margin-bottom:0.15rem;">Guru Win% by Ticker</div>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:1rem;">Based on guru's entry→exit price pairs</div>
+        <div style="height:280px; position:relative;">
+            <canvas id="guruPieChart"></canvas>
+        </div>
+    </div>
+    <div class="card">
+        <div style="font-weight:600; margin-bottom:0.15rem;">Bot Win% by Ticker</div>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:1rem;">Based on actual realized P&L</div>
+        <div style="height:280px; position:relative;">
+            <canvas id="botPieChart"></canvas>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <!-- Unsupported Ticker Performance -->
 {% if unsupported_tickers %}
 <div class="table-wrap" style="margin-top:1.5rem;">
@@ -239,5 +259,61 @@
         P&L estimated from guru's entry/exit prices × 1 contract (100 shares). Add ticker to TICKER_CONFIG if performance justifies it.
     </div>
 </div>
+{% endif %}
+
+{% if guru_pie or bot_pie %}
+<script>
+const pieColors = [
+    '#58a6ff', '#3fb950', '#f85149', '#d29922', '#bc8cff',
+    '#db6d28', '#39d353', '#f778ba', '#79c0ff', '#56d4dd',
+    '#e3b341', '#ff7b72', '#a5d6ff', '#7ee787', '#ffa657'
+];
+
+function buildPieChart(canvasId, data) {
+    const ctx = document.getElementById(canvasId);
+    if (!ctx || !data.length) return;
+    new Chart(ctx, {
+        type: 'pie',
+        data: {
+            labels: data.map(d => d.ticker + ' ' + d.win_rate + '%'),
+            datasets: [{
+                data: data.map(d => d.win_rate),
+                backgroundColor: pieColors.slice(0, data.length),
+                borderColor: '#0d1117',
+                borderWidth: 2,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'right',
+                    labels: {
+                        color: '#e6edf3',
+                        font: { size: 12, family: "'SF Mono', monospace" },
+                        padding: 12,
+                        usePointStyle: true,
+                        pointStyle: 'circle',
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(ctx) {
+                            const d = data[ctx.dataIndex];
+                            return d.ticker + ': ' + d.win_rate + '% win (' + d.trades + ' trades)';
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+const guruPie = {{ guru_pie | tojson }};
+const botPie = {{ bot_pie | tojson }};
+buildPieChart('guruPieChart', guruPie);
+buildPieChart('botPieChart', botPie);
+</script>
 {% endif %}
 {% endblock %}

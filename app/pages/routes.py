@@ -615,6 +615,53 @@ async def guru_page(request: Request):
     bot_total_wins = sum(b["wins"] for b in bot_by_ticker.values())
     fill_rate = round(executed / total * 100, 1) if total else 0.0
 
+    # Guru win rate by ticker (pair BUY→CLOSE for supported tickers)
+    guru_supported_sql = """
+        SELECT * FROM guru_signals
+        WHERE our_outcome != 'skipped'
+        ORDER BY ticker, signal_time
+    """
+    guru_sup_rows = conn.execute(guru_supported_sql).fetchall()
+    guru_open: dict = {}  # key: (ticker, strike, right) → entry
+    guru_ticker_stats: dict = {}
+
+    for r in guru_sup_rows:
+        t = r["ticker"]
+        if not t:
+            continue
+        if t not in guru_ticker_stats:
+            guru_ticker_stats[t] = {"wins": 0, "losses": 0}
+
+        action = (r["action"] or "").upper()
+        strike = r["strike"]
+        right = r["right"]
+        key = (t, strike, right)
+
+        if action == "BUY" and r.get("entry_price"):
+            guru_open[key] = r
+        elif action in ("CLOSE", "SELL", "PARTIAL_CLOSE") and key in guru_open:
+            entry = guru_open.pop(key)
+            exit_p = r.get("exit_price") or r.get("entry_price")
+            if exit_p and entry.get("entry_price"):
+                if exit_p > entry["entry_price"]:
+                    guru_ticker_stats[t]["wins"] += 1
+                else:
+                    guru_ticker_stats[t]["losses"] += 1
+
+    # Build pie chart data: guru and bot
+    guru_pie = []
+    for t, s in sorted(guru_ticker_stats.items()):
+        total = s["wins"] + s["losses"]
+        if total > 0:
+            guru_pie.append({"ticker": t, "win_rate": round(s["wins"] / total * 100, 1), "trades": total})
+
+    bot_pie = []
+    for t, b in sorted(bot_by_ticker.items()):
+        total = b["trades"]
+        if total > 0:
+            wr = round(b["wins"] / total * 100, 1)
+            bot_pie.append({"ticker": t, "win_rate": wr, "trades": total})
+
     # Unsupported ticker performance (guru signals we skipped)
     # Pair BUY→CLOSE by ticker+right+strike to estimate guru P&L
     unsupported_sql = """
@@ -682,6 +729,8 @@ async def guru_page(request: Request):
         "gap_reasons": gap_reasons,
         "missed": missed,
         "unsupported_tickers": unsupported_list,
+        "guru_pie": guru_pie,
+        "bot_pie": bot_pie,
     })
 
 
