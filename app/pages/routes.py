@@ -176,9 +176,7 @@ async def trade_detail_page(request: Request, position_id: str):
     if redirect:
         return redirect
 
-    import sys
-    sys.path.insert(0, "/Users/srinivasthammanaboina/spx_trader")
-    from state.journal import TradingJournal
+    from app.journal import TradingJournal
 
     conn = get_db()
     journal = TradingJournal(conn)
