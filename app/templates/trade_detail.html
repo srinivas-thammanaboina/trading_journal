@@ -193,6 +193,7 @@
             <tr>
                 <th>Time</th>
                 <th>Side</th>
+                <th>Fill Type</th>
                 <th>Contracts</th>
                 <th>Fill Price</th>
                 <th>Commission</th>
@@ -206,6 +207,15 @@
                 <td>
                     <span class="badge {{ 'badge-green' if e.side == 'BOT' else 'badge-red' }}">{{ e.side }}</span>
                 </td>
+                <td>
+                    {% set ft = e.fill_type or '—' %}
+                    {% if ft == 'limit' %}<span style="color:#4ecdc4;">{{ ft }}</span>
+                    {% elif ft == 'market' %}<span style="color:#f39c12;">{{ ft }}</span>
+                    {% elif ft == 'partial' %}<span style="color:#3498db;">{{ ft }}</span>
+                    {% elif ft == 'auto_close' %}<span style="color:#e74c3c;">{{ ft }}</span>
+                    {% elif ft == 'reconciled' %}<span style="color:#9b59b6;">{{ ft }}</span>
+                    {% else %}{{ ft }}{% endif %}
+                </td>
                 <td>{{ e.contracts }}</td>
                 <td>${{ "%.2f"|format(e.fill_price or 0) }}</td>
                 <td>{{ '$%.2f'|format(e.commission) if e.commission else '—' }}</td>
@@ -213,7 +223,7 @@
             </tr>
             {% endfor %}
             {% if not executions %}
-            <tr><td colspan="6" style="text-align:center; color:var(--text-secondary);">No executions</td></tr>
+            <tr><td colspan="7" style="text-align:center; color:var(--text-secondary);">No executions</td></tr>
             {% endif %}
         </tbody>
     </table>
