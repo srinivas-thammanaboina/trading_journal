@@ -98,28 +98,27 @@ async def get_trades_pnl(
                     FROM realized_pnl_events
                     WHERE 1=1 {where_r.replace('r.', '')}"""
 
-    # Open positions from positions + entry executions
+    # All entry executions (BOT side) — shows both open and closed entries
     ft_col_open = "fill_type" if has_fill_type else "NULL as fill_type"
-    open_sql = f"""SELECT execution_time as event_time, 'OPEN' as event_type,
+    where_plain_filt = where_e.replace('e.', '')
+    entry_sql = f"""SELECT execution_time as event_time, 'ENTRY' as event_type,
                           position_id, ticker, contract_symbol,
                           contracts as contracts_closed, fill_price as entry_price,
                           NULL as exit_price, NULL as realized_pnl, trade_date,
-                          NULL as exit_reason, {ft_col_open}, 'open' as trade_status
+                          NULL as exit_reason, {ft_col_open},
+                          CASE WHEN position_id IN (SELECT position_id FROM positions)
+                               THEN 'open' ELSE 'closed' END as trade_status
                    FROM executions
                    WHERE side = 'BOT'
-                     AND position_id IN (SELECT position_id FROM positions)
-                     AND position_id NOT IN (SELECT position_id FROM realized_pnl_events)
-                     {where_e.replace('e.', '')}"""
+                     {where_plain_filt}"""
 
-    union_sql = f"SELECT * FROM ({closed_sql} UNION ALL {open_sql}) ORDER BY event_time DESC"
-    # params: filter_vals for closed part + filter_vals for open part
+    union_sql = f"SELECT * FROM ({closed_sql} UNION ALL {entry_sql}) ORDER BY event_time DESC"
+    # params: filter_vals for closed part + filter_vals for entry part
     union_params = filter_vals + filter_vals
 
     # Count
     count_sql = f"""SELECT (SELECT COUNT(*) FROM realized_pnl_events WHERE 1=1 {where_plain})
                   + (SELECT COUNT(*) FROM executions WHERE side = 'BOT'
-                     AND position_id IN (SELECT position_id FROM positions)
-                     AND position_id NOT IN (SELECT position_id FROM realized_pnl_events)
                      {where_plain}) as cnt"""
     count_params = filter_vals + filter_vals
     total = conn.execute(count_sql, count_params).fetchone()["cnt"]
