@@ -1,4 +1,6 @@
-"""Broker performance metrics API — latency, slippage, fill quality."""
+"""Broker performance metrics API — latency, slippage, fill quality, gateway health."""
+
+import json
 
 from fastapi import APIRouter, Request
 from app.db import get_db
@@ -44,6 +46,70 @@ async def get_broker_metrics(request: Request, start: str = "", end: str = "", t
     """
     latency = dict(conn.execute(latency_sql, params).fetchone() or {})
 
+    # --- Latency split: Submit→ACK, Submit→Fill, Cancel Confirmation ---
+    latency_split_sql = f"""
+        SELECT
+            ROUND(AVG(
+                CASE WHEN ack_received_at IS NOT NULL AND submit_started_at IS NOT NULL
+                THEN (julianday(ack_received_at) - julianday(submit_started_at)) * 86400000
+                ELSE NULL END
+            ), 0) as avg_submit_to_ack_ms,
+            MIN(
+                CASE WHEN ack_received_at IS NOT NULL AND submit_started_at IS NOT NULL
+                THEN (julianday(ack_received_at) - julianday(submit_started_at)) * 86400000
+                ELSE NULL END
+            ) as min_submit_to_ack_ms,
+            MAX(
+                CASE WHEN ack_received_at IS NOT NULL AND submit_started_at IS NOT NULL
+                THEN (julianday(ack_received_at) - julianday(submit_started_at)) * 86400000
+                ELSE NULL END
+            ) as max_submit_to_ack_ms,
+            ROUND(AVG(
+                CASE WHEN first_fill_at IS NOT NULL AND submit_started_at IS NOT NULL
+                THEN (julianday(first_fill_at) - julianday(submit_started_at)) * 86400000
+                ELSE NULL END
+            ), 0) as avg_submit_to_fill_ms,
+            MIN(
+                CASE WHEN first_fill_at IS NOT NULL AND submit_started_at IS NOT NULL
+                THEN (julianday(first_fill_at) - julianday(submit_started_at)) * 86400000
+                ELSE NULL END
+            ) as min_submit_to_fill_ms,
+            MAX(
+                CASE WHEN first_fill_at IS NOT NULL AND submit_started_at IS NOT NULL
+                THEN (julianday(first_fill_at) - julianday(submit_started_at)) * 86400000
+                ELSE NULL END
+            ) as max_submit_to_fill_ms
+        FROM orders o {where}
+    """
+    latency_split = dict(conn.execute(latency_split_sql, params).fetchone() or {})
+
+    # Cancel confirmation latency (from order_events: cancel_requested → canceled)
+    cancel_conditions = []
+    cancel_params = []
+    if start:
+        cancel_conditions.append("oe1.event_time >= ?")
+        cancel_params.append(start)
+    if end:
+        cancel_conditions.append("oe1.event_time <= ?")
+        cancel_params.append(end + "T23:59:59")
+    cancel_where = f"AND {' AND '.join(cancel_conditions)}" if cancel_conditions else ""
+
+    cancel_sql = f"""
+        SELECT ROUND(AVG(
+            (julianday(oe2.event_time) - julianday(oe1.event_time)) * 86400000
+        ), 0) as avg_cancel_confirm_ms
+        FROM order_events oe1
+        JOIN order_events oe2 ON oe1.order_id = oe2.order_id
+        WHERE oe1.event_type = 'cancel_requested'
+          AND oe2.event_type = 'canceled'
+          {cancel_where}
+    """
+    try:
+        cancel_row = conn.execute(cancel_sql, cancel_params).fetchone()
+        latency_split["avg_cancel_confirm_ms"] = (cancel_row["avg_cancel_confirm_ms"] or 0) if cancel_row else 0
+    except Exception:
+        latency_split["avg_cancel_confirm_ms"] = 0
+
     # --- Slippage metrics (only for filled orders with reference_mid) ---
     slippage_conditions = conditions + ["o.fill_price IS NOT NULL", "o.reference_mid IS NOT NULL", "o.reference_mid > 0"]
     slippage_where = f"WHERE {' AND '.join(slippage_conditions)}"
@@ -62,10 +128,154 @@ async def get_broker_metrics(request: Request, start: str = "", end: str = "", t
             ), 4) as avg_slippage_vs_signal,
             ROUND(AVG(o.reference_ask - o.reference_bid), 4) as avg_spread,
             ROUND(AVG(o.quote_age_ms), 0) as avg_quote_age_ms,
-            COUNT(CASE WHEN o.quote_age_ms > 2000 THEN 1 END) as stale_quotes
+            COUNT(CASE WHEN o.quote_age_ms > 2000 THEN 1 END) as stale_quotes,
+            ROUND(AVG(o.fill_price), 2) as avg_fill_price,
+            ROUND(AVG(o.signal_price), 2) as avg_entry_price
         FROM orders o {slippage_where}
     """
     slippage = dict(conn.execute(slippage_sql, slippage_params).fetchone() or {})
+
+    # --- Order flow summary ---
+    all_orders_conditions = []
+    all_orders_params = []
+    if start:
+        all_orders_conditions.append("o.trade_date >= ?")
+        all_orders_params.append(start)
+    if end:
+        all_orders_conditions.append("o.trade_date <= ?")
+        all_orders_params.append(end)
+    if ticker:
+        all_orders_conditions.append("o.ticker = ?")
+        all_orders_params.append(ticker)
+    all_orders_where = f"WHERE {' AND '.join(all_orders_conditions)}" if all_orders_conditions else ""
+
+    order_flow_sql = f"""
+        SELECT
+            COUNT(*) as total_submitted,
+            COUNT(CASE WHEN o.status = 'filled' THEN 1 END) as filled,
+            COUNT(CASE WHEN o.status = 'cancelled' OR o.status = 'canceled' THEN 1 END) as cancelled,
+            COUNT(CASE WHEN o.status = 'failed' THEN 1 END) as failed,
+            COUNT(CASE WHEN o.escalated = 1 THEN 1 END) as escalated,
+            MAX(o.filled_at) as last_fill_time
+        FROM orders o {all_orders_where}
+    """
+    order_flow = dict(conn.execute(order_flow_sql, all_orders_params).fetchone() or {})
+
+    # Partial fills count from order_events
+    partial_conditions = []
+    partial_params = []
+    if start:
+        partial_conditions.append("oe.event_time >= ?")
+        partial_params.append(start)
+    if end:
+        partial_conditions.append("oe.event_time <= ?")
+        partial_params.append(end + "T23:59:59")
+    partial_where = f"WHERE {' AND '.join(partial_conditions)}" if partial_conditions else ""
+    if partial_where:
+        partial_where += " AND oe.event_type = 'partial_fill'"
+    else:
+        partial_where = "WHERE oe.event_type = 'partial_fill'"
+
+    try:
+        partial_row = conn.execute(
+            f"SELECT COUNT(*) as count FROM order_events oe {partial_where}", partial_params
+        ).fetchone()
+        order_flow["partial_fills"] = partial_row["count"] if partial_row else 0
+    except Exception:
+        order_flow["partial_fills"] = 0
+
+    # Compute rates
+    total = order_flow.get("total_submitted", 0) or 1
+    order_flow["fill_rate"] = round(order_flow.get("filled", 0) / total * 100, 1)
+    order_flow["cancel_rate"] = round(order_flow.get("cancelled", 0) / total * 100, 1)
+    order_flow["escalation_rate"] = round(order_flow.get("escalated", 0) / total * 100, 1)
+    order_flow["reject_rate"] = round(order_flow.get("failed", 0) / total * 100, 1)
+
+    # --- Gateway health ---
+    try:
+        gw_row = conn.execute(
+            "SELECT gateway_connected, updated_at, trade_date FROM system_state ORDER BY trade_date DESC LIMIT 1"
+        ).fetchone()
+        gateway_health = {
+            "connected": bool(gw_row["gateway_connected"]) if gw_row else False,
+            "last_sync": gw_row["updated_at"] if gw_row else None,
+            "trade_date": gw_row["trade_date"] if gw_row else None,
+            "market_data": "Live" if (gw_row and gw_row["gateway_connected"]) else "Unavailable",
+            "reconnects": None,  # Not tracked in DB yet (Phase 2)
+            "disconnect_duration": None,  # Not tracked in DB yet (Phase 2)
+            "uptime_pct": None,  # Not tracked in DB yet (Phase 2)
+        }
+    except Exception:
+        gateway_health = {
+            "connected": False, "last_sync": None, "trade_date": None,
+            "market_data": "Unknown", "reconnects": None,
+            "disconnect_duration": None, "uptime_pct": None,
+        }
+
+    # --- Recent errors ---
+    error_conditions = []
+    error_params = []
+    if start:
+        error_conditions.append("o.trade_date >= ?")
+        error_params.append(start)
+    if end:
+        error_conditions.append("o.trade_date <= ?")
+        error_params.append(end)
+    if ticker:
+        error_conditions.append("o.ticker = ?")
+        error_params.append(ticker)
+    error_where = f"AND {' AND '.join(error_conditions)}" if error_conditions else ""
+
+    errors_sql = f"""
+        SELECT
+            COALESCE(oe.event_time, o.order_time) as error_time,
+            oe.event_type as error_type,
+            oe.metadata as error_metadata,
+            o.ticker,
+            o.contract_symbol,
+            o.status as order_status,
+            o.order_type,
+            o.order_action
+        FROM orders o
+        LEFT JOIN order_events oe ON o.id = oe.order_id
+            AND oe.event_type IN ('rejected', 'canceled', 'escalated')
+        WHERE (o.status IN ('failed', 'cancelled', 'canceled') OR oe.event_type IS NOT NULL)
+            {error_where}
+        ORDER BY COALESCE(oe.event_time, o.order_time) DESC
+        LIMIT 20
+    """
+    try:
+        errors = [dict(r) for r in conn.execute(errors_sql, error_params).fetchall()]
+        # Parse metadata JSON for error codes/messages
+        for e in errors:
+            if e.get("error_metadata"):
+                try:
+                    meta = json.loads(e["error_metadata"])
+                    e["error_code"] = meta.get("error_code", meta.get("code", ""))
+                    e["error_message"] = meta.get("error_message", meta.get("message", meta.get("reason", "")))
+                except (json.JSONDecodeError, TypeError):
+                    e["error_code"] = ""
+                    e["error_message"] = str(e["error_metadata"])[:100]
+            else:
+                e["error_code"] = ""
+                e["error_message"] = e.get("error_type", e.get("order_status", ""))
+    except Exception:
+        errors = []
+
+    # Error count by date (for sparkline — last 7 days)
+    try:
+        error_sparkline_sql = """
+            SELECT o.trade_date, COUNT(*) as count
+            FROM orders o
+            WHERE o.status IN ('failed', 'cancelled', 'canceled')
+            GROUP BY o.trade_date
+            ORDER BY o.trade_date DESC
+            LIMIT 7
+        """
+        error_sparkline = [dict(r) for r in conn.execute(error_sparkline_sql).fetchall()]
+        error_sparkline.reverse()  # chronological order
+    except Exception:
+        error_sparkline = []
 
     # --- Per-ticker breakdown ---
     ticker_sql = f"""
@@ -139,12 +349,12 @@ async def get_broker_metrics(request: Request, start: str = "", end: str = "", t
 
     # --- System notes ---
     notes = []
-    total = latency.get("total_orders", 0)
-    if total > 0:
+    total_orders = latency.get("total_orders", 0)
+    if total_orders > 0:
         avg_lat = latency.get("avg_latency_ms", 0) or 0
-        escalated = latency.get("escalated_count", 0) or 0
+        escalated_count = latency.get("escalated_count", 0) or 0
         over_20 = latency.get("over_20s", 0) or 0
-        esc_pct = round(escalated / total * 100, 1) if total else 0
+        esc_pct = round(escalated_count / total_orders * 100, 1) if total_orders else 0
         stale = slippage.get("stale_quotes", 0) or 0
 
         if avg_lat < 5000:
@@ -178,7 +388,12 @@ async def get_broker_metrics(request: Request, start: str = "", end: str = "", t
 
     return {
         "latency": latency,
+        "latency_split": latency_split,
         "slippage": slippage,
+        "order_flow": order_flow,
+        "gateway_health": gateway_health,
+        "errors": errors,
+        "error_sparkline": error_sparkline,
         "by_ticker": by_ticker,
         "recent_orders": recent,
         "order_events": events,

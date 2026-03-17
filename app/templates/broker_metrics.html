@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Broker Metrics{% endblock %}
 {% block content %}
-<h1>Broker Execution Metrics</h1>
-<p class="subtitle">Latency, slippage, and order quality monitoring</p>
+<h1>Broker Metrics</h1>
+<p class="subtitle">Track your IBKR gateway health and order performance</p>
 
 <!-- Filters -->
 <div class="filter-bar" style="margin-bottom:1.5rem;">
@@ -14,137 +14,371 @@
     <a href="/broker-metrics" style="color:var(--text-secondary); margin-left:0.5rem;">Clear</a>
 </div>
 
-<!-- Summary Cards -->
-<div class="stats-grid" style="grid-template-columns: repeat(5, 1fr); margin-bottom:2rem;">
-    <div class="card stat-card">
-        <div class="stat-label">Total Orders</div>
-        <div class="stat-value">{{ latency.total_orders or 0 }}</div>
-        <div class="stat-sub">instrumented</div>
-    </div>
-    <div class="card stat-card">
-        <div class="stat-label">Avg Latency</div>
-        <div class="stat-value {% if (latency.avg_latency_ms or 0) < 5000 %}positive{% elif (latency.avg_latency_ms or 0) < 15000 %}{% else %}negative{% endif %}">
-            {{ "%.1f"|format((latency.avg_latency_ms or 0) / 1000) }}s
+<!-- ══════ TOP ROW: Gateway Status | Broker Errors | Order Flow ══════ -->
+<div class="bm-top-row">
+    <!-- Gateway Status -->
+    <div class="card bm-gateway-card">
+        <div class="bm-card-label">GATEWAY STATUS</div>
+        <div class="bm-gateway-status {% if gateway_health.connected %}bm-connected{% else %}bm-disconnected{% endif %}">
+            <span class="bm-status-dot {% if gateway_health.connected %}bm-dot-green{% else %}bm-dot-red{% endif %}"></span>
+            {{ "Connected" if gateway_health.connected else "Disconnected" }}
         </div>
-        <div class="stat-sub">submit → fill</div>
+        {% if gateway_health.last_sync %}
+        <div class="bm-card-sub">Last: {{ gateway_health.last_sync }}</div>
+        {% endif %}
     </div>
-    <div class="card stat-card">
-        <div class="stat-label">Avg Slippage</div>
-        <div class="stat-value {% if (slippage.avg_slippage or 0) <= 0.05 %}positive{% elif (slippage.avg_slippage or 0) <= 0.15 %}{% else %}negative{% endif %}">
-            ${{ "%.4f"|format(slippage.avg_slippage or 0) }}
+
+    <!-- Broker Errors -->
+    <div class="card bm-errors-card">
+        <div class="bm-card-label">BROKER ERRORS
+            <span class="badge badge-red" style="margin-left:0.5rem;">{{ errors|length }}</span>
         </div>
-        <div class="stat-sub">vs mid price</div>
-    </div>
-    <div class="card stat-card">
-        <div class="stat-label">Escalation Rate</div>
-        {% set esc_rate = ((latency.escalated_count or 0) / (latency.total_orders or 1) * 100) %}
-        <div class="stat-value {% if esc_rate < 20 %}positive{% elif esc_rate < 40 %}{% else %}negative{% endif %}">
-            {{ "%.1f"|format(esc_rate) }}%
+        <div class="bm-errors-value">{{ errors|length }} <span class="bm-errors-today">Today</span></div>
+        {% if error_sparkline %}
+        <div class="bm-sparkline-row">
+            {% set max_err = error_sparkline|map(attribute='count')|max if error_sparkline else 1 %}
+            {% for pt in error_sparkline %}
+            <div class="bm-sparkline-bar" style="height:{{ (pt.count / (max_err if max_err > 0 else 1) * 30)|int }}px;" title="{{ pt.trade_date }}: {{ pt.count }}"></div>
+            {% endfor %}
         </div>
-        <div class="stat-sub">{{ latency.escalated_count or 0 }} limit→market</div>
+        {% endif %}
     </div>
-    <div class="card stat-card">
-        <div class="stat-label">Avg Spread</div>
-        <div class="stat-value">${{ "%.4f"|format(slippage.avg_spread or 0) }}</div>
-        <div class="stat-sub">bid-ask at entry</div>
+
+    <!-- Order Flow -->
+    <div class="card bm-orderflow-card">
+        <div class="bm-card-label">ORDER FLOW</div>
+        <div class="bm-of-main">
+            <span class="bm-of-big">{{ order_flow.filled or 0 }}</span>
+            <span class="bm-of-text">Orders filled</span>
+            <span class="bm-of-today">Today</span>
+        </div>
+        <div class="bm-of-detail">
+            <span>{{ order_flow.total_submitted or 0 }} <span class="bm-of-dim">Submitted</span></span>
+            <span style="margin-left:1rem;">{{ order_flow.last_fill_time[11:16] if order_flow.last_fill_time and order_flow.last_fill_time|length > 16 else '—' }} <span class="bm-of-dim">Last Filled</span></span>
+        </div>
     </div>
 </div>
 
-<!-- Latency Distribution + Slippage Detail -->
-<div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; margin-bottom:2rem;">
-    <!-- Latency Distribution -->
-    <div class="card">
-        <div class="chart-title">Latency Distribution</div>
-        <div class="chart-sub">ACK → Fill times</div>
-        <div style="position:relative; height:240px;">
-            <canvas id="latencyChart"></canvas>
+<!-- ══════ MIDDLE ROW: Gateway Health + Order Flow Summary | Latency Breakdown ══════ -->
+<div class="bm-mid-row">
+    <!-- Left column: Gateway Health + Order Flow Summary stacked -->
+    <div class="bm-mid-left">
+        <!-- Gateway Health -->
+        <div class="card">
+            <div class="chart-title">Gateway Health</div>
+            <table class="bm-health-table">
+                <tbody>
+                    <tr>
+                        <td>Reconnects</td>
+                        <td>
+                            {% if gateway_health.reconnects is not none %}
+                                {{ gateway_health.reconnects }}
+                                <span class="bm-today-badge">Today</span>
+                            {% else %}
+                                <span class="bm-na">N/A</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Disconnect Duration</td>
+                        <td>
+                            {% if gateway_health.disconnect_duration is not none %}
+                                ~{{ gateway_health.disconnect_duration }}s
+                                <span style="color:var(--text-muted); font-size:0.75rem;">Avg Duration</span>
+                            {% else %}
+                                <span class="bm-na">N/A</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Last Sync</td>
+                        <td>
+                            {% if gateway_health.last_sync %}
+                                {{ gateway_health.last_sync }}
+                            {% else %}
+                                <span class="bm-na">—</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Market Data</td>
+                        <td>
+                            <span class="{% if gateway_health.market_data == 'Live' %}positive{% else %}negative{% endif %}">
+                                {{ gateway_health.market_data }}
+                            </span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Account Access Uptime</td>
+                        <td>
+                            {% if gateway_health.uptime_pct is not none %}
+                                {{ "%.1f"|format(gateway_health.uptime_pct) }}%
+                            {% else %}
+                                <span class="bm-na">N/A</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
         </div>
-        <table style="margin-top:1rem;">
-            <thead><tr><th>Range</th><th>Count</th><th>%</th></tr></thead>
-            <tbody>
-                {% set total = latency.total_orders or 1 %}
-                {% for label, key in [('<2s', 'under_2s'), ('2-5s', '_2_to_5s'), ('5-10s', '_5_to_10s'), ('10-20s', '_10_to_20s'), ('20s+', 'over_20s')] %}
-                <tr>
-                    <td>{{ label }}</td>
-                    <td>{{ latency.get(key, 0) or 0 }}</td>
-                    <td>{{ "%.0f"|format((latency.get(key, 0) or 0) / total * 100) }}%</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+
+        <!-- Order Flow Summary -->
+        <div class="card">
+            <div class="chart-title">Order Flow Summary</div>
+            <table class="bm-health-table">
+                <tbody>
+                    <tr>
+                        <td>Orders Submitted</td>
+                        <td>
+                            <strong>{{ order_flow.total_submitted or 0 }}</strong>
+                            <span class="bm-today-badge">Today</span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Partial Fills</td>
+                        <td>
+                            <strong>{{ order_flow.partial_fills or 0 }}</strong>
+                            <span class="bm-today-badge">Today</span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Fills</td>
+                        <td>
+                            <strong>{{ order_flow.filled or 0 }}</strong>
+                            <span class="bm-today-badge">Today</span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Cancels</td>
+                        <td>
+                            <strong>{{ order_flow.cancelled or 0 }}</strong>
+                            <span class="bm-today-badge">Today</span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Escalation Rate</td>
+                        <td>
+                            <strong class="{% if (order_flow.escalation_rate or 0) > 20 %}negative{% endif %}">{{ order_flow.escalation_rate or 0 }}%</strong>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>Reject Rate</td>
+                        <td>
+                            <strong class="{% if (order_flow.reject_rate or 0) > 5 %}negative{% endif %}">{{ order_flow.reject_rate or 0 }}%</strong>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
     </div>
 
-    <!-- Slippage Detail -->
-    <div class="card">
-        <div class="chart-title">Slippage Analysis</div>
-        <div class="chart-sub">Fill price vs reference benchmarks</div>
-        <table style="margin-top:1rem;">
-            <thead><tr><th>Metric</th><th>Value</th></tr></thead>
-            <tbody>
-                <tr>
-                    <td>Avg slippage vs mid</td>
-                    <td class="{% if (slippage.avg_slippage or 0) <= 0.05 %}positive{% else %}negative{% endif %}">
-                        ${{ "%.4f"|format(slippage.avg_slippage or 0) }}
-                    </td>
-                </tr>
-                <tr>
-                    <td>Avg slippage vs signal price</td>
-                    <td class="{% if (slippage.avg_slippage_vs_signal or 0) <= 0.10 %}positive{% else %}negative{% endif %}">
-                        ${{ "%.4f"|format(slippage.avg_slippage_vs_signal or 0) }}
-                    </td>
-                </tr>
-                <tr>
-                    <td>Avg bid-ask spread</td>
-                    <td>${{ "%.4f"|format(slippage.avg_spread or 0) }}</td>
-                </tr>
-                <tr>
-                    <td>Avg quote age</td>
-                    <td>{{ slippage.avg_quote_age_ms or 0 }}ms</td>
-                </tr>
-                <tr>
-                    <td>Stale quotes (>2s)</td>
-                    <td class="{% if (slippage.stale_quotes or 0) > 0 %}negative{% endif %}">
-                        {{ slippage.stale_quotes or 0 }}
-                    </td>
-                </tr>
-                <tr>
-                    <td>Orders with quote data</td>
-                    <td>{{ slippage.total_with_quote or 0 }}</td>
-                </tr>
-            </tbody>
-        </table>
+    <!-- Right column: Latency Breakdown -->
+    <div class="card bm-latency-card">
+        <div class="bm-card-label">LATENCY BREAKDOWN</div>
+        {% set avg_total = (latency.avg_latency_ms or 0) %}
+        <div class="bm-latency-hero">
+            <span class="bm-latency-big">{{ avg_total|int }}</span>
+            <span class="bm-latency-unit">ms</span>
+            <span class="bm-latency-pct {% if avg_total < 500 %}positive{% elif avg_total < 2000 %}{% else %}negative{% endif %}">
+                Submit ~ Fill
+            </span>
+            <span style="color:var(--text-muted); font-size:0.75rem; margin-left:0.5rem;">
+                Avg Slippage {{ "%.1f"|format((slippage.avg_slippage or 0) * 100) }}c x mid
+            </span>
+        </div>
+
+        <!-- Latency Breakdown Detail -->
+        <div class="bm-latency-grid">
+            <!-- Submit → Ack -->
+            <div class="bm-latency-item">
+                <div class="bm-latency-label">Submit ~ Ack</div>
+                <div class="bm-latency-val">
+                    <span class="bm-latency-num">{{ (latency_split.avg_submit_to_ack_ms or 0)|int }}</span>
+                    <span class="bm-latency-ms">ms Avg</span>
+                </div>
+                <div class="bm-latency-range">
+                    <span>Min · {{ (latency_split.min_submit_to_ack_ms or 0)|int }}ms</span>
+                    <span>{{ (latency_split.avg_submit_to_ack_ms or 0)|int }}ms Avg</span>
+                    <span>Max · {{ (latency_split.max_submit_to_ack_ms or 0)|int }}ms</span>
+                </div>
+                <div class="bm-mini-bar">
+                    {% set ack_pct = ((latency_split.avg_submit_to_ack_ms or 0) / (avg_total if avg_total > 0 else 1) * 100)|int %}
+                    <div class="bm-mini-fill" style="width:{{ ack_pct if ack_pct <= 100 else 100 }}%;"></div>
+                </div>
+            </div>
+
+            <!-- Submit → Fill -->
+            <div class="bm-latency-item">
+                <div class="bm-latency-label">Submit ~ Fill</div>
+                <div class="bm-latency-val">
+                    <span class="bm-latency-num">{{ (latency_split.avg_submit_to_fill_ms or 0)|int }}</span>
+                    <span class="bm-latency-ms">ms Avg</span>
+                </div>
+                <div class="bm-latency-range">
+                    <span>Min · {{ (latency_split.min_submit_to_fill_ms or 0)|int }}ms</span>
+                    <span>{{ (latency_split.avg_submit_to_fill_ms or 0)|int }}ms Avg</span>
+                    <span>Max · {{ (latency_split.max_submit_to_fill_ms or 0)|int }}ms</span>
+                </div>
+                <div class="bm-mini-bar">
+                    {% set fill_pct = ((latency_split.avg_submit_to_fill_ms or 0) / (avg_total if avg_total > 0 else 1) * 100)|int %}
+                    <div class="bm-mini-fill bm-fill-orange" style="width:{{ fill_pct if fill_pct <= 100 else 100 }}%;"></div>
+                </div>
+            </div>
+
+            <!-- Cancel Confirmation -->
+            <div class="bm-latency-item">
+                <div class="bm-latency-label">Cancel Confirmation</div>
+                <div class="bm-latency-val">
+                    <span class="bm-latency-num">{{ (latency_split.avg_cancel_confirm_ms or 0)|int }}</span>
+                    <span class="bm-latency-ms">ms Avg</span>
+                </div>
+                <div class="bm-mini-bar">
+                    {% set cancel_pct = ((latency_split.avg_cancel_confirm_ms or 0) / (avg_total if avg_total > 0 else 1) * 100)|int %}
+                    <div class="bm-mini-fill bm-fill-purple" style="width:{{ cancel_pct if cancel_pct <= 100 else 100 }}%;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ══════ BOTTOM ROW: Recent Errors | Execution Quality ══════ -->
+<div class="bm-bot-row">
+    <!-- Recent Errors -->
+    <div class="card bm-errors-table-card">
+        <div class="chart-title">Recent Errors</div>
+        <div class="table-wrap" style="border:none;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>TIME</th>
+                        <th>CODE</th>
+                        <th>PROBLEM</th>
+                        <th>SYMBOL</th>
+                        <th>STAGE</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for e in errors[:10] %}
+                    <tr>
+                        <td style="white-space:nowrap;">{{ e.error_time[11:19] if e.error_time and e.error_time|length > 19 else e.error_time or '—' }}</td>
+                        <td>
+                            {% if e.error_code %}
+                            <span class="badge badge-yellow">{{ e.error_code }}</span>
+                            {% else %}
+                            <span style="color:var(--text-muted);">—</span>
+                            {% endif %}
+                        </td>
+                        <td style="max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                            {{ e.error_message or e.error_type or e.order_status or '—' }}
+                        </td>
+                        <td>{{ e.contract_symbol or e.ticker or '—' }}</td>
+                        <td>
+                            {% if e.error_type == 'rejected' %}<span class="badge badge-red">Rejected</span>
+                            {% elif e.error_type == 'canceled' %}<span class="badge badge-yellow">Canceled</span>
+                            {% elif e.error_type == 'escalated' %}<span class="badge" style="background:rgba(219,109,40,0.15); color:var(--orange);">Escalated</span>
+                            {% elif e.order_status == 'failed' %}<span class="badge badge-red">Failed</span>
+                            {% else %}<span class="badge badge-muted">{{ e.error_type or e.order_status or '—' }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not errors %}
+                    <tr><td colspan="5" style="text-align:center; color:var(--text-secondary); padding:1.5rem;">No errors in selected period</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Execution Quality -->
+    <div class="card bm-exec-card">
+        <div class="chart-title">Execution Quality</div>
+
+        <!-- Slippage vs Mid -->
+        <div class="bm-exec-section">
+            <div class="bm-exec-label">Slippage vs Mid</div>
+            <div class="bm-exec-prices">
+                <div class="bm-price-box">
+                    <div class="bm-price-big">${{ "%.2f"|format(slippage.avg_entry_price or 0) }}</div>
+                    <div class="bm-price-label">Entry Price</div>
+                </div>
+                <div class="bm-price-box">
+                    <div class="bm-price-big">${{ "%.2f"|format(slippage.avg_fill_price or 0) }}</div>
+                    <div class="bm-price-label">Avg Fill</div>
+                </div>
+            </div>
+            <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.3rem;">
+                Avg slippage: <span class="{{ 'positive' if (slippage.avg_slippage or 0) <= 0.05 else 'negative' }}">${{ "%.4f"|format(slippage.avg_slippage or 0) }}</span>
+                &middot; Spread: ${{ "%.4f"|format(slippage.avg_spread or 0) }}
+            </div>
+        </div>
+
+        <!-- Fill Rate -->
+        <div class="bm-exec-section">
+            <div class="bm-exec-label">Fill Rate</div>
+            <div class="bm-rate-row">
+                <div class="bm-rate-bar-track">
+                    <div class="bm-rate-bar-fill bm-bar-green" style="width:{{ order_flow.fill_rate or 0 }}%;"></div>
+                </div>
+                <div class="bm-rate-value">
+                    <strong>{{ order_flow.fill_rate or 0 }}%</strong>
+                    <span class="badge badge-green" style="margin-left:0.3rem;">Filled</span>
+                </div>
+            </div>
+            <div style="font-size:0.72rem; color:var(--text-muted);">
+                Today's Orders
+            </div>
+        </div>
+
+        <!-- Cancel Rate -->
+        <div class="bm-exec-section">
+            <div class="bm-exec-label">Cancel Rate</div>
+            <div class="bm-rate-row">
+                <div class="bm-rate-bar-track">
+                    <div class="bm-rate-bar-fill bm-bar-red" style="width:{{ order_flow.cancel_rate or 0 }}%;"></div>
+                </div>
+                <div class="bm-rate-value">
+                    <strong>{{ order_flow.cancel_rate or 0 }}%</strong>
+                </div>
+            </div>
+            <div style="font-size:0.72rem; color:var(--text-muted);">
+                Today's Orders
+            </div>
+        </div>
 
         <!-- Fill Type Distribution -->
-        <div class="chart-title" style="margin-top:1.5rem;">Fill Type Distribution</div>
-        <table>
-            <thead><tr><th>Type</th><th>Count</th></tr></thead>
-            <tbody>
-                {% for ft in fill_types %}
-                <tr>
-                    <td>
-                        {% if ft.fill_type == 'limit' %}<span style="color:#4ecdc4;">{{ ft.fill_type }}</span>
-                        {% elif ft.fill_type == 'market' %}<span style="color:#f39c12;">{{ ft.fill_type }}</span>
-                        {% elif ft.fill_type == 'partial' %}<span style="color:#3498db;">{{ ft.fill_type }}</span>
-                        {% elif ft.fill_type == 'auto_close' %}<span style="color:#e74c3c;">{{ ft.fill_type }}</span>
-                        {% elif ft.fill_type == 'reconciled' %}<span style="color:#9b59b6;">{{ ft.fill_type }}</span>
-                        {% else %}{{ ft.fill_type }}{% endif %}
-                    </td>
-                    <td>{{ ft.count }}</td>
-                </tr>
-                {% endfor %}
-                {% if not fill_types %}
-                <tr><td colspan="2" style="color:var(--text-secondary);">No fill data yet</td></tr>
-                {% endif %}
-            </tbody>
-        </table>
+        <div class="bm-exec-section" style="margin-top:0.75rem;">
+            <div class="bm-exec-label">Fill Type Distribution</div>
+            <table style="margin-top:0.3rem;">
+                <thead><tr><th>Type</th><th>Count</th></tr></thead>
+                <tbody>
+                    {% for ft in fill_types %}
+                    <tr>
+                        <td>
+                            {% if ft.fill_type == 'limit' %}<span style="color:#4ecdc4;">{{ ft.fill_type }}</span>
+                            {% elif ft.fill_type == 'market' %}<span style="color:#f39c12;">{{ ft.fill_type }}</span>
+                            {% elif ft.fill_type == 'partial' %}<span style="color:#3498db;">{{ ft.fill_type }}</span>
+                            {% elif ft.fill_type == 'auto_close' %}<span style="color:#e74c3c;">{{ ft.fill_type }}</span>
+                            {% elif ft.fill_type == 'reconciled' %}<span style="color:#9b59b6;">{{ ft.fill_type }}</span>
+                            {% else %}{{ ft.fill_type }}{% endif %}
+                        </td>
+                        <td>{{ ft.count }}</td>
+                    </tr>
+                    {% endfor %}
+                    {% if not fill_types %}
+                    <tr><td colspan="2" style="color:var(--text-secondary);">No fill data yet</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>
 
-<!-- Per-Ticker Breakdown -->
-<div class="card" style="margin-bottom:2rem;">
+<!-- ══════ PER-TICKER BREAKDOWN ══════ -->
+<div class="card" style="margin-bottom:1.5rem;">
     <div class="chart-title">Per-Ticker Breakdown</div>
     <div class="chart-sub">Latency and slippage by symbol</div>
-    <div class="table-wrap">
+    <div class="table-wrap" style="border:none;">
         <table>
             <thead>
                 <tr>
@@ -166,7 +400,7 @@
                     <td class="positive">{{ t.filled }}</td>
                     <td class="{% if t.failed > 0 %}negative{% endif %}">{{ t.failed }}</td>
                     <td class="{% if t.escalated > 0 %}negative{% endif %}">{{ t.escalated }}</td>
-                    <td>{{ "%.1f"|format((t.avg_latency_ms or 0) / 1000) }}s</td>
+                    <td>{{ "%.0f"|format(t.avg_latency_ms or 0) }}ms</td>
                     <td class="{% if (t.avg_slippage or 0) <= 0.05 %}positive{% elif (t.avg_slippage or 0) <= 0.15 %}{% else %}negative{% endif %}">
                         {{ "$%.4f"|format(t.avg_slippage) if t.avg_slippage is not none else '—' }}
                     </td>
@@ -183,47 +417,64 @@
     </div>
 </div>
 
-<!-- Latency Range Cards -->
-<div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:1.5rem; margin-bottom:2rem;">
+<!-- ══════ LATENCY DISTRIBUTION CHART ══════ -->
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; margin-bottom:1.5rem;">
     <div class="card">
-        <div class="chart-title">Min Latency</div>
-        <div class="stat-value positive" style="font-size:1.5rem;">
-            {{ "%.1f"|format((latency.min_latency_ms or 0) / 1000) }}s
+        <div class="chart-title">Latency Distribution</div>
+        <div class="chart-sub">ACK to Fill times</div>
+        <div style="position:relative; height:240px;">
+            <canvas id="latencyChart"></canvas>
         </div>
-        <div class="stat-sub">fastest order</div>
+        <table style="margin-top:1rem;">
+            <thead><tr><th>Range</th><th>Count</th><th>%</th></tr></thead>
+            <tbody>
+                {% set total = latency.total_orders or 1 %}
+                {% for label, key in [('<2s', 'under_2s'), ('2-5s', '_2_to_5s'), ('5-10s', '_5_to_10s'), ('10-20s', '_10_to_20s'), ('20s+', 'over_20s')] %}
+                <tr>
+                    <td>{{ label }}</td>
+                    <td>{{ latency.get(key, 0) or 0 }}</td>
+                    <td>{{ "%.0f"|format((latency.get(key, 0) or 0) / total * 100) }}%</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
+
+    <!-- System Notes -->
     <div class="card">
-        <div class="chart-title">Avg Latency</div>
-        <div class="stat-value" style="font-size:1.5rem;">
-            {{ "%.1f"|format((latency.avg_latency_ms or 0) / 1000) }}s
+        <div class="chart-title">System Notes</div>
+        <div class="chart-sub">Automated analysis of execution quality</div>
+        <ul style="margin-top:1rem; line-height:1.8; list-style:none;">
+            {% for note in notes %}
+            <li style="color:var(--text-secondary); padding:0.2rem 0;">
+                <span style="color:var(--text-muted); margin-right:0.3rem;">&bull;</span> {{ note }}
+            </li>
+            {% endfor %}
+        </ul>
+
+        <!-- Latency Min/Avg/Max -->
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.75rem; margin-top:1.5rem;">
+            <div style="text-align:center;">
+                <div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Min</div>
+                <div class="positive" style="font-size:1.2rem; font-weight:700; font-family:var(--font-mono);">{{ "%.0f"|format(latency.min_latency_ms or 0) }}ms</div>
+            </div>
+            <div style="text-align:center;">
+                <div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Avg</div>
+                <div style="font-size:1.2rem; font-weight:700; font-family:var(--font-mono); color:var(--text-primary);">{{ "%.0f"|format(latency.avg_latency_ms or 0) }}ms</div>
+            </div>
+            <div style="text-align:center;">
+                <div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Max</div>
+                <div class="negative" style="font-size:1.2rem; font-weight:700; font-family:var(--font-mono);">{{ "%.0f"|format(latency.max_latency_ms or 0) }}ms</div>
+            </div>
         </div>
-        <div class="stat-sub">typical order</div>
-    </div>
-    <div class="card">
-        <div class="chart-title">Max Latency</div>
-        <div class="stat-value negative" style="font-size:1.5rem;">
-            {{ "%.1f"|format((latency.max_latency_ms or 0) / 1000) }}s
-        </div>
-        <div class="stat-sub">slowest order</div>
     </div>
 </div>
 
-<!-- System Notes -->
-<div class="card" style="margin-bottom:2rem;">
-    <div class="chart-title">System Notes</div>
-    <div class="chart-sub">Automated analysis of execution quality</div>
-    <ul style="margin-top:1rem; line-height:1.8;">
-        {% for note in notes %}
-        <li style="color:var(--text-secondary);">{{ note }}</li>
-        {% endfor %}
-    </ul>
-</div>
-
-<!-- Recent Orders -->
+<!-- ══════ RECENT ORDERS TABLE ══════ -->
 <div class="card" style="margin-bottom:2rem;">
     <div class="chart-title">Recent Orders</div>
     <div class="chart-sub">Latest instrumented orders with full metrics</div>
-    <div class="table-wrap">
+    <div class="table-wrap" style="border:none;">
         <table>
             <thead>
                 <tr>
@@ -259,7 +510,7 @@
                             <span class="{{ 'positive' if slip <= 0.05 else 'negative' }}">${{ "%.4f"|format(slip) }}</span>
                         {% else %}—{% endif %}
                     </td>
-                    <td>{{ "%.1f"|format((o.total_latency_ms or 0) / 1000) }}s</td>
+                    <td>{{ "%.0f"|format(o.total_latency_ms or 0) }}ms</td>
                     <td>
                         {% if o.status == 'filled' %}<span class="badge badge-green">filled</span>
                         {% elif o.status == 'failed' %}<span class="badge badge-red">failed</span>
@@ -277,7 +528,6 @@
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <script>
 function applyFilter() {
     const start = document.getElementById('startDate').value;
