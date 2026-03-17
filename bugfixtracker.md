@@ -52,6 +52,16 @@ All bugs found and fixed during development, tracked for audit and regression aw
 - **Fix**: Wrapped both canvases in properly sized relative containers
 - **Commit**: `81e1503`
 
+## 2026-03-17 — Source Alert Mismatch Fix
+
+### BUG-008: Trade detail Source Alert shows wrong guru message
+- **File**: `app/journal.py` (line ~230)
+- **Severity**: High (data integrity / misleading UI)
+- **Found by**: Live observation — 6715P trade showed "Bought SPX 6770C at 4.80" (first alert of the day) instead of the actual "Bought SPX 6715P at 1.00 & 6725C .70"
+- **Issue**: Fallback alert query used `ORDER BY alert_time LIMIT 1`, always picking the earliest filled alert of the day for that ticker. When multiple alerts exist on the same day, the wrong (earliest) alert was displayed. The Guru Signal section worked correctly because it already used time-proximity matching.
+- **Fix**: Changed fallback to `ORDER BY ABS(julianday(alert_time) - julianday(entry_fill_time)) LIMIT 1` — matches the alert closest in time to the actual trade fill
+- **Commit**: `1a348c0`
+
 ## 2026-03-17 — Reconciliation Fix (spx_trader)
 
 ### BUG-007: Reconciliation quantity mismatch — warn only, no auto-correct
