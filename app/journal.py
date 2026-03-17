@@ -220,16 +220,27 @@ class TradingJournal:
             contract = position.get("contract_symbol", "")
             trade_date = position.get("opened_at", "")[:10] if position.get("opened_at") else ""
 
-        # Linked alert (match by signal_id from order, or by ticker+strike+date)
+        # Find entry execution for time-proximity matching
+        entry_exec = next((e for e in executions if e.get("side") == "BOT"), None)
+
+        # Linked alert (match by signal_id from order, or by time-proximity)
         alert = None
         if orders and orders[0].get("signal_id"):
             alert = self.conn.execute(
                 "SELECT * FROM alerts WHERE signal_id = ?",
                 (orders[0]["signal_id"],),
             ).fetchone()
-        if not alert and trade_date and ticker:
+        if not alert and trade_date and ticker and entry_exec:
+            # Use time-proximity to find the alert closest to the actual fill
             alert = self.conn.execute(
-                "SELECT * FROM alerts WHERE trade_date = ? AND ticker = ? AND outcome = 'filled' ORDER BY alert_time LIMIT 1",
+                """SELECT * FROM alerts WHERE trade_date = ? AND ticker = ? AND outcome = 'filled'
+                   ORDER BY ABS(julianday(alert_time) - julianday(?))
+                   LIMIT 1""",
+                (trade_date, ticker, entry_exec["execution_time"]),
+            ).fetchone()
+        elif not alert and trade_date and ticker:
+            alert = self.conn.execute(
+                "SELECT * FROM alerts WHERE trade_date = ? AND ticker = ? AND outcome = 'filled' ORDER BY alert_time DESC LIMIT 1",
                 (trade_date, ticker),
             ).fetchone()
         alert = dict(alert) if alert else None
@@ -238,7 +249,6 @@ class TradingJournal:
         guru_signal = None
         if trade_date and ticker:
             # Find the BUY guru signal closest to this position
-            entry_exec = next((e for e in executions if e.get("side") == "BOT"), None)
             if entry_exec:
                 guru_signal = self.conn.execute(
                     """SELECT * FROM guru_signals
