@@ -192,23 +192,45 @@ async def get_broker_metrics(request: Request, start: str = "", end: str = "", t
     order_flow["reject_rate"] = round(order_flow.get("failed", 0) / total * 100, 1)
 
     # --- Gateway health ---
+    # system_state table has: trade_date, daily_realized_pnl, daily_unrealized_pnl,
+    # halted, halt_reason, last_reconcile_time, updated_at
+    # gateway_connected column does NOT exist yet — derive status from updated_at recency
     try:
         gw_row = conn.execute(
-            "SELECT gateway_connected, updated_at, trade_date FROM system_state ORDER BY trade_date DESC LIMIT 1"
+            "SELECT updated_at, trade_date, halted FROM system_state ORDER BY trade_date DESC LIMIT 1"
         ).fetchone()
-        gateway_health = {
-            "connected": bool(gw_row["gateway_connected"]) if gw_row else False,
-            "last_sync": gw_row["updated_at"] if gw_row else None,
-            "trade_date": gw_row["trade_date"] if gw_row else None,
-            "market_data": "Live" if (gw_row and gw_row["gateway_connected"]) else "Unavailable",
-            "reconnects": None,  # Not tracked in DB yet (Phase 2)
-            "disconnect_duration": None,  # Not tracked in DB yet (Phase 2)
-            "uptime_pct": None,  # Not tracked in DB yet (Phase 2)
-        }
+        if gw_row:
+            last_sync = gw_row["updated_at"]
+            # Consider "connected" if last state update was within the last 5 minutes
+            from datetime import datetime, timedelta, timezone
+            try:
+                # Parse ISO timestamp (may have timezone offset)
+                sync_str = last_sync.replace("-04:00", "+00:00").replace("-05:00", "+00:00") if last_sync else ""
+                sync_time = datetime.fromisoformat(sync_str) if sync_str else None
+                now = datetime.now(timezone.utc)
+                is_recent = sync_time and (now - sync_time.replace(tzinfo=timezone.utc)) < timedelta(minutes=5)
+            except Exception:
+                is_recent = False
+            gateway_health = {
+                "connected": is_recent,
+                "last_sync": last_sync,
+                "trade_date": gw_row["trade_date"],
+                "market_data": "Live" if is_recent else "Stale",
+                "halted": bool(gw_row["halted"]),
+                "reconnects": None,  # Not tracked in DB yet (Phase 2)
+                "disconnect_duration": None,  # Not tracked in DB yet (Phase 2)
+                "uptime_pct": None,  # Not tracked in DB yet (Phase 2)
+            }
+        else:
+            gateway_health = {
+                "connected": False, "last_sync": None, "trade_date": None,
+                "market_data": "Unknown", "halted": False, "reconnects": None,
+                "disconnect_duration": None, "uptime_pct": None,
+            }
     except Exception:
         gateway_health = {
             "connected": False, "last_sync": None, "trade_date": None,
-            "market_data": "Unknown", "reconnects": None,
+            "market_data": "Unknown", "halted": False, "reconnects": None,
             "disconnect_duration": None, "uptime_pct": None,
         }
 
