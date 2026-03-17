@@ -62,6 +62,7 @@ from app.api.alerts import router as alerts_router
 from app.api.pnl import router as pnl_router
 from app.api.stats import router as stats_router
 from app.api.guru import router as guru_router
+from app.api.broker_metrics import router as broker_metrics_router
 from app.pages.routes import router as pages_router
 
 app.include_router(auth_router)
@@ -72,4 +73,5 @@ app.include_router(alerts_router)
 app.include_router(pnl_router)
 app.include_router(stats_router)
 app.include_router(guru_router)
+app.include_router(broker_metrics_router)
 app.include_router(pages_router)

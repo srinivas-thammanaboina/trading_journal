@@ -1,0 +1,333 @@
+{% extends "base.html" %}
+{% block title %}Broker Metrics{% endblock %}
+{% block content %}
+<h1>Broker Execution Metrics</h1>
+<p class="subtitle">Latency, slippage, and order quality monitoring</p>
+
+<!-- Filters -->
+<div class="filter-bar" style="margin-bottom:1.5rem;">
+    <input type="date" id="startDate" value="{{ start_date }}">
+    <span style="color:var(--text-secondary);">to</span>
+    <input type="date" id="endDate" value="{{ end_date }}">
+    <input type="text" id="tickerFilter" placeholder="Ticker" value="{{ ticker_filter }}" style="width:80px;">
+    <button class="btn-primary" onclick="applyFilter()">Filter</button>
+    <a href="/broker-metrics" style="color:var(--text-secondary); margin-left:0.5rem;">Clear</a>
+</div>
+
+<!-- Summary Cards -->
+<div class="stats-grid" style="grid-template-columns: repeat(5, 1fr); margin-bottom:2rem;">
+    <div class="card stat-card">
+        <div class="stat-label">Total Orders</div>
+        <div class="stat-value">{{ latency.total_orders or 0 }}</div>
+        <div class="stat-sub">instrumented</div>
+    </div>
+    <div class="card stat-card">
+        <div class="stat-label">Avg Latency</div>
+        <div class="stat-value {% if (latency.avg_latency_ms or 0) < 5000 %}positive{% elif (latency.avg_latency_ms or 0) < 15000 %}{% else %}negative{% endif %}">
+            {{ "%.1f"|format((latency.avg_latency_ms or 0) / 1000) }}s
+        </div>
+        <div class="stat-sub">submit → fill</div>
+    </div>
+    <div class="card stat-card">
+        <div class="stat-label">Avg Slippage</div>
+        <div class="stat-value {% if (slippage.avg_slippage or 0) <= 0.05 %}positive{% elif (slippage.avg_slippage or 0) <= 0.15 %}{% else %}negative{% endif %}">
+            ${{ "%.4f"|format(slippage.avg_slippage or 0) }}
+        </div>
+        <div class="stat-sub">vs mid price</div>
+    </div>
+    <div class="card stat-card">
+        <div class="stat-label">Escalation Rate</div>
+        {% set esc_rate = ((latency.escalated_count or 0) / (latency.total_orders or 1) * 100) %}
+        <div class="stat-value {% if esc_rate < 20 %}positive{% elif esc_rate < 40 %}{% else %}negative{% endif %}">
+            {{ "%.1f"|format(esc_rate) }}%
+        </div>
+        <div class="stat-sub">{{ latency.escalated_count or 0 }} limit→market</div>
+    </div>
+    <div class="card stat-card">
+        <div class="stat-label">Avg Spread</div>
+        <div class="stat-value">${{ "%.4f"|format(slippage.avg_spread or 0) }}</div>
+        <div class="stat-sub">bid-ask at entry</div>
+    </div>
+</div>
+
+<!-- Latency Distribution + Slippage Detail -->
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; margin-bottom:2rem;">
+    <!-- Latency Distribution -->
+    <div class="card">
+        <div class="chart-title">Latency Distribution</div>
+        <div class="chart-sub">ACK → Fill times</div>
+        <div style="position:relative; height:240px;">
+            <canvas id="latencyChart"></canvas>
+        </div>
+        <table style="margin-top:1rem;">
+            <thead><tr><th>Range</th><th>Count</th><th>%</th></tr></thead>
+            <tbody>
+                {% set total = latency.total_orders or 1 %}
+                {% for label, key in [('<2s', 'under_2s'), ('2-5s', '_2_to_5s'), ('5-10s', '_5_to_10s'), ('10-20s', '_10_to_20s'), ('20s+', 'over_20s')] %}
+                <tr>
+                    <td>{{ label }}</td>
+                    <td>{{ latency.get(key, 0) or 0 }}</td>
+                    <td>{{ "%.0f"|format((latency.get(key, 0) or 0) / total * 100) }}%</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Slippage Detail -->
+    <div class="card">
+        <div class="chart-title">Slippage Analysis</div>
+        <div class="chart-sub">Fill price vs reference benchmarks</div>
+        <table style="margin-top:1rem;">
+            <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td>Avg slippage vs mid</td>
+                    <td class="{% if (slippage.avg_slippage or 0) <= 0.05 %}positive{% else %}negative{% endif %}">
+                        ${{ "%.4f"|format(slippage.avg_slippage or 0) }}
+                    </td>
+                </tr>
+                <tr>
+                    <td>Avg slippage vs signal price</td>
+                    <td class="{% if (slippage.avg_slippage_vs_signal or 0) <= 0.10 %}positive{% else %}negative{% endif %}">
+                        ${{ "%.4f"|format(slippage.avg_slippage_vs_signal or 0) }}
+                    </td>
+                </tr>
+                <tr>
+                    <td>Avg bid-ask spread</td>
+                    <td>${{ "%.4f"|format(slippage.avg_spread or 0) }}</td>
+                </tr>
+                <tr>
+                    <td>Avg quote age</td>
+                    <td>{{ slippage.avg_quote_age_ms or 0 }}ms</td>
+                </tr>
+                <tr>
+                    <td>Stale quotes (>2s)</td>
+                    <td class="{% if (slippage.stale_quotes or 0) > 0 %}negative{% endif %}">
+                        {{ slippage.stale_quotes or 0 }}
+                    </td>
+                </tr>
+                <tr>
+                    <td>Orders with quote data</td>
+                    <td>{{ slippage.total_with_quote or 0 }}</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- Fill Type Distribution -->
+        <div class="chart-title" style="margin-top:1.5rem;">Fill Type Distribution</div>
+        <table>
+            <thead><tr><th>Type</th><th>Count</th></tr></thead>
+            <tbody>
+                {% for ft in fill_types %}
+                <tr>
+                    <td>
+                        {% if ft.fill_type == 'limit' %}<span style="color:#4ecdc4;">{{ ft.fill_type }}</span>
+                        {% elif ft.fill_type == 'market' %}<span style="color:#f39c12;">{{ ft.fill_type }}</span>
+                        {% elif ft.fill_type == 'partial' %}<span style="color:#3498db;">{{ ft.fill_type }}</span>
+                        {% elif ft.fill_type == 'auto_close' %}<span style="color:#e74c3c;">{{ ft.fill_type }}</span>
+                        {% elif ft.fill_type == 'reconciled' %}<span style="color:#9b59b6;">{{ ft.fill_type }}</span>
+                        {% else %}{{ ft.fill_type }}{% endif %}
+                    </td>
+                    <td>{{ ft.count }}</td>
+                </tr>
+                {% endfor %}
+                {% if not fill_types %}
+                <tr><td colspan="2" style="color:var(--text-secondary);">No fill data yet</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Per-Ticker Breakdown -->
+<div class="card" style="margin-bottom:2rem;">
+    <div class="chart-title">Per-Ticker Breakdown</div>
+    <div class="chart-sub">Latency and slippage by symbol</div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Ticker</th>
+                    <th>Orders</th>
+                    <th>Filled</th>
+                    <th>Failed</th>
+                    <th>Escalated</th>
+                    <th>Avg Latency</th>
+                    <th>Slippage (mid)</th>
+                    <th>Slippage (signal)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for t in by_ticker %}
+                <tr>
+                    <td><strong>{{ t.ticker }}</strong></td>
+                    <td>{{ t.orders }}</td>
+                    <td class="positive">{{ t.filled }}</td>
+                    <td class="{% if t.failed > 0 %}negative{% endif %}">{{ t.failed }}</td>
+                    <td class="{% if t.escalated > 0 %}negative{% endif %}">{{ t.escalated }}</td>
+                    <td>{{ "%.1f"|format((t.avg_latency_ms or 0) / 1000) }}s</td>
+                    <td class="{% if (t.avg_slippage or 0) <= 0.05 %}positive{% elif (t.avg_slippage or 0) <= 0.15 %}{% else %}negative{% endif %}">
+                        {{ "$%.4f"|format(t.avg_slippage) if t.avg_slippage is not none else '—' }}
+                    </td>
+                    <td class="{% if (t.avg_slippage_vs_signal or 0) <= 0.10 %}positive{% else %}negative{% endif %}">
+                        {{ "$%.4f"|format(t.avg_slippage_vs_signal) if t.avg_slippage_vs_signal is not none else '—' }}
+                    </td>
+                </tr>
+                {% endfor %}
+                {% if not by_ticker %}
+                <tr><td colspan="8" style="text-align:center; color:var(--text-secondary);">No order data yet</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Latency Range Cards -->
+<div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:1.5rem; margin-bottom:2rem;">
+    <div class="card">
+        <div class="chart-title">Min Latency</div>
+        <div class="stat-value positive" style="font-size:1.5rem;">
+            {{ "%.1f"|format((latency.min_latency_ms or 0) / 1000) }}s
+        </div>
+        <div class="stat-sub">fastest order</div>
+    </div>
+    <div class="card">
+        <div class="chart-title">Avg Latency</div>
+        <div class="stat-value" style="font-size:1.5rem;">
+            {{ "%.1f"|format((latency.avg_latency_ms or 0) / 1000) }}s
+        </div>
+        <div class="stat-sub">typical order</div>
+    </div>
+    <div class="card">
+        <div class="chart-title">Max Latency</div>
+        <div class="stat-value negative" style="font-size:1.5rem;">
+            {{ "%.1f"|format((latency.max_latency_ms or 0) / 1000) }}s
+        </div>
+        <div class="stat-sub">slowest order</div>
+    </div>
+</div>
+
+<!-- System Notes -->
+<div class="card" style="margin-bottom:2rem;">
+    <div class="chart-title">System Notes</div>
+    <div class="chart-sub">Automated analysis of execution quality</div>
+    <ul style="margin-top:1rem; line-height:1.8;">
+        {% for note in notes %}
+        <li style="color:var(--text-secondary);">{{ note }}</li>
+        {% endfor %}
+    </ul>
+</div>
+
+<!-- Recent Orders -->
+<div class="card" style="margin-bottom:2rem;">
+    <div class="chart-title">Recent Orders</div>
+    <div class="chart-sub">Latest instrumented orders with full metrics</div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Ticker</th>
+                    <th>Type</th>
+                    <th>Action</th>
+                    <th>Qty</th>
+                    <th>Limit</th>
+                    <th>Fill</th>
+                    <th>Mid</th>
+                    <th>Slippage</th>
+                    <th>Latency</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for o in recent_orders %}
+                <tr>
+                    <td style="font-size:0.8rem;">{{ o.order_time[11:19] if o.order_time and o.order_time|length > 19 else o.order_time or '—' }}</td>
+                    <td><strong>{{ o.ticker }}</strong></td>
+                    <td>{{ o.order_type }}</td>
+                    <td>
+                        <span class="badge {{ 'badge-green' if o.order_action == 'BUY' else 'badge-red' }}">{{ o.order_action }}</span>
+                    </td>
+                    <td>{{ o.contracts }}</td>
+                    <td>{{ "$%.2f"|format(o.limit_price) if o.limit_price else '—' }}</td>
+                    <td>{{ "$%.2f"|format(o.fill_price) if o.fill_price else '—' }}</td>
+                    <td>{{ "$%.2f"|format(o.reference_mid) if o.reference_mid else '—' }}</td>
+                    <td>
+                        {% if o.fill_price and o.reference_mid and o.reference_mid > 0 %}
+                            {% set slip = o.fill_price - o.reference_mid if o.order_action == 'BUY' else o.reference_mid - o.fill_price %}
+                            <span class="{{ 'positive' if slip <= 0.05 else 'negative' }}">${{ "%.4f"|format(slip) }}</span>
+                        {% else %}—{% endif %}
+                    </td>
+                    <td>{{ "%.1f"|format((o.total_latency_ms or 0) / 1000) }}s</td>
+                    <td>
+                        {% if o.status == 'filled' %}<span class="badge badge-green">filled</span>
+                        {% elif o.status == 'failed' %}<span class="badge badge-red">failed</span>
+                        {% elif o.status == 'escalated' %}<span class="badge" style="background:#f39c12;">escalated</span>
+                        {% else %}<span class="badge">{{ o.status }}</span>{% endif %}
+                        {% if o.escalated %}<span style="color:#f39c12; font-size:0.7rem;"> ESC</span>{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+                {% if not recent_orders %}
+                <tr><td colspan="11" style="text-align:center; color:var(--text-secondary);">No instrumented orders yet</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script>
+function applyFilter() {
+    const start = document.getElementById('startDate').value;
+    const end = document.getElementById('endDate').value;
+    const ticker = document.getElementById('tickerFilter').value;
+    let url = '/broker-metrics?';
+    if (start) url += `start=${start}&`;
+    if (end) url += `end=${end}&`;
+    if (ticker) url += `ticker=${ticker}&`;
+    window.location.href = url;
+}
+
+// Latency distribution chart
+const latencyData = {
+    labels: ['<2s', '2-5s', '5-10s', '10-20s', '20s+'],
+    datasets: [{
+        data: [
+            {{ latency.get('under_2s', 0) or 0 }},
+            {{ latency.get('_2_to_5s', 0) or 0 }},
+            {{ latency.get('_5_to_10s', 0) or 0 }},
+            {{ latency.get('_10_to_20s', 0) or 0 }},
+            {{ latency.get('over_20s', 0) or 0 }}
+        ],
+        backgroundColor: ['#4ecdc4', '#45b7d1', '#f39c12', '#e67e22', '#e74c3c'],
+        borderWidth: 0,
+        borderRadius: 4
+    }]
+};
+const ctx = document.getElementById('latencyChart');
+if (ctx) {
+    new Chart(ctx, {
+        type: 'bar',
+        data: latencyData,
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: { color: '#8b949e', stepSize: 1 },
+                    grid: { color: 'rgba(255,255,255,0.05)' }
+                },
+                x: {
+                    ticks: { color: '#8b949e' },
+                    grid: { display: false }
+                }
+            }
+        }
+    });
+}
+</script>
+{% endblock %}

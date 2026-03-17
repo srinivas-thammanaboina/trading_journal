@@ -912,3 +912,31 @@ async def health_page(request: Request):
         "auto_close_triggered": auto_close_triggered,
         "is_market_hours": is_market_hours,
     })
+
+
+@router.get("/broker-metrics", response_class=HTMLResponse)
+async def broker_metrics_page(request: Request, start: str = "", end: str = "", ticker: str = ""):
+    redirect = _require_auth(request)
+    if redirect:
+        return redirect
+
+    from app.api.broker_metrics import get_broker_metrics
+    data = await get_broker_metrics(request, start=start, end=end, ticker=ticker)
+
+    # Default dates
+    if not start:
+        conn = get_db()
+        latest = conn.execute(
+            "SELECT MIN(trade_date) as s, MAX(trade_date) as e FROM orders WHERE submit_started_at IS NOT NULL"
+        ).fetchone()
+        start = latest["s"] or date.today().isoformat()
+        end = latest["e"] or date.today().isoformat()
+
+    return templates.TemplateResponse("broker_metrics.html", {
+        "request": request,
+        "active_page": "broker_metrics",
+        "start_date": start,
+        "end_date": end or start,
+        "ticker_filter": ticker,
+        **data,
+    })
