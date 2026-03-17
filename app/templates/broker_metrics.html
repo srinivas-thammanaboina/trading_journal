@@ -5,13 +5,15 @@
 <p class="subtitle">Track your IBKR gateway health and order performance</p>
 
 <!-- Filters -->
-<div class="filter-bar" style="margin-bottom:1.5rem;">
-    <input type="date" id="startDate" value="{{ start_date }}">
-    <span style="color:var(--text-secondary);">to</span>
-    <input type="date" id="endDate" value="{{ end_date }}">
-    <input type="text" id="tickerFilter" placeholder="Ticker" value="{{ ticker_filter }}" style="width:80px;">
-    <button class="btn-primary" onclick="applyFilter()">Filter</button>
-    <a href="/broker-metrics" style="color:var(--text-secondary); margin-left:0.5rem;">Clear</a>
+<div class="filters">
+    <form method="GET" action="/broker-metrics" style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
+        <input type="date" name="start" id="startDate" value="{{ start_date }}" title="Start date">
+        <span style="color:var(--text-muted);">to</span>
+        <input type="date" name="end" id="endDate" value="{{ end_date }}" title="End date">
+        <input type="text" name="ticker" id="tickerFilter" value="{{ ticker_filter }}" placeholder="Ticker" style="width:80px;">
+        <button type="submit">Filter</button>
+        <a href="/broker-metrics" class="clear-link">Clear</a>
+    </form>
 </div>
 
 <!-- ══════ TOP ROW: Gateway Status | Broker Errors | Order Flow ══════ -->
