@@ -42,7 +42,7 @@ All bugs found and fixed during development, tracked for audit and regression aw
 - **Found by**: Data audit — dashboard always showed "Disconnected", investigated root cause
 - **Issue**: API queried `gateway_connected` from `system_state` table. The column exists in the schema but the bot doesn't actively update it on connect/disconnect events, so it always returned the default value, making the gateway status indicator unreliable
 - **Fix**: Derive connection status from `updated_at` recency (within 5 min = connected) + `halted` status. More reliable than a stored boolean that isn't maintained
-- **Commit**: uncommitted (staged in working tree)
+- **Commit**: `5ae8585`
 
 ### BUG-006: Chart.js canvas overflow on Analytics page
 - **File**: `app/templates/analytics.html`
@@ -51,3 +51,13 @@ All bugs found and fixed during development, tracked for audit and regression aw
 - **Issue**: Chart.js canvases for Cumulative P&L and Win/Loss charts were not wrapped in `position:relative; height:Xpx` containers, causing unbounded growth
 - **Fix**: Wrapped both canvases in properly sized relative containers
 - **Commit**: `81e1503`
+
+## 2026-03-17 — Reconciliation Fix (spx_trader)
+
+### BUG-007: Reconciliation quantity mismatch — warn only, no auto-correct
+- **File**: `broker/ibkr_broker.py` (line ~1456), `state/trade_state.py`
+- **Severity**: High
+- **Found by**: Live observation — IBKR showed NVDA qty=-4, bot state showed qty=1, reconciliation logged warning but didn't fix it
+- **Issue**: Step 3 of `reconcile_positions()` detected quantity mismatches between bot state and IBKR but only sent a Telegram warning saying "Check manually". State was never corrected, so the journal and bot continued showing wrong qty
+- **Fix**: Added `update_position_contracts()` to `trade_state.py` — updates both in-memory and SQLite. Reconciliation step 3 now auto-corrects state to match IBKR and sends "QUANTITY CORRECTED" notification instead of "Check manually"
+- **Commit**: pending (spx_trader repo)
