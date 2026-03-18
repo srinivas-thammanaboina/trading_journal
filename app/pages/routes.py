@@ -60,7 +60,8 @@ async def dashboard(request: Request):
 
     # Recent trades — one row per position (grouped)
     recent_entries = conn.execute(
-        """SELECT e.position_id, e.ticker, e.contract_symbol, e.trade_date,
+        """SELECT e.position_id, e.ticker, e.contract_symbol,
+                  MIN(e.trade_date) as trade_date,
                   MIN(e.execution_time) as entry_time,
                   MAX(CASE WHEN e.side = 'BOT' THEN e.fill_price END) as entry_price,
                   SUM(CASE WHEN e.side = 'BOT' THEN e.contracts ELSE 0 END) as qty

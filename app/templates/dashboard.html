@@ -82,7 +82,17 @@
                 </tr>
             </thead>
             <tbody>
+                {% set ns = namespace(last_date='') %}
                 {% for t in recent_trades %}
+                {% set trade_date = t.trade_date or (t.entry_time[:10] if t.entry_time and t.entry_time|length >= 10 else '') %}
+                {% if trade_date != ns.last_date %}
+                <tr class="date-separator">
+                    <td colspan="7" style="padding:0.5rem 1rem; font-size:0.75rem; font-weight:600; color:var(--text-secondary); background:rgba(255,255,255,0.03); border-top:1px solid var(--border-color);">
+                        {{ trade_date }}
+                    </td>
+                </tr>
+                {% set ns.last_date = trade_date %}
+                {% endif %}
                 <tr class="clickable-row" onclick="window.location='/trade/{{ t.position_id }}'">
                     <td>{{ t.entry_time[11:16] if t.entry_time and t.entry_time|length > 16 else t.entry_time or '' }}</td>
                     <td><strong>{{ t.ticker }}</strong> {{ t.contract_symbol }}</td>

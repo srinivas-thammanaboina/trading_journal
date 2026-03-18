@@ -373,6 +373,9 @@ class TradingJournal:
             exit_price = side_exits[-1].get("fill_price")
         total_pnl = sum(p.get("realized_pnl", 0) for p in pnl_events)
 
+        sold_qty = sum(e.get("contracts", 0) for e in side_exits)
+        remaining = max(contracts - sold_qty, 0)
+
         summary = {
             "position_id": position_id,
             "ticker": ticker,
@@ -381,6 +384,7 @@ class TradingJournal:
             "entry_price": entry_price,
             "exit_price": exit_price,
             "contracts": contracts,
+            "remaining": remaining,
             "total_pnl": round(total_pnl, 2),
             "is_win": total_pnl > 0,
             "is_open": position is not None,
