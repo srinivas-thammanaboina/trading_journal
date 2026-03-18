@@ -204,11 +204,12 @@ async def get_broker_metrics(request: Request, start: str = "", end: str = "", t
             # Consider "connected" if last state update was within the last 5 minutes
             from datetime import datetime, timedelta, timezone
             try:
-                # Parse ISO timestamp (may have timezone offset)
-                sync_str = last_sync.replace("-04:00", "+00:00").replace("-05:00", "+00:00") if last_sync else ""
-                sync_time = datetime.fromisoformat(sync_str) if sync_str else None
+                sync_time = datetime.fromisoformat(last_sync) if last_sync else None
+                # Ensure timezone-aware for comparison
+                if sync_time and sync_time.tzinfo is None:
+                    sync_time = sync_time.replace(tzinfo=timezone.utc)
                 now = datetime.now(timezone.utc)
-                is_recent = sync_time and (now - sync_time.replace(tzinfo=timezone.utc)) < timedelta(minutes=5)
+                is_recent = sync_time and (now - sync_time) < timedelta(minutes=5)
             except Exception:
                 is_recent = False
             gateway_health = {
