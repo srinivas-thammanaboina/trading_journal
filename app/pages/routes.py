@@ -85,8 +85,9 @@ async def dashboard(request: Request):
 
         total_pnl = round((pnl_row["total_pnl"] or 0), 2) if pnl_row else 0
         exit_price = pnl_row["exit_price"] if pnl_row else None
+        has_exits = pnl_row and pnl_row["total_pnl"] is not None
 
-        status = "open" if is_open and not pnl_row["total_pnl"] else "partial" if is_open else "closed"
+        status = "open" if is_open and not has_exits else "partial" if is_open else "closed"
         recent_trades.append({
             **entry,
             "total_pnl": total_pnl,
