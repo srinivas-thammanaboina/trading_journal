@@ -265,35 +265,52 @@ class TradingJournal:
         guru_signal = dict(guru_signal) if guru_signal else None
 
         # Build unified timeline
+        # Note: alert_time is a DB-write timestamp (recorded AFTER order placement).
+        # Use submit_started_at from the first entry order as the anchor — alert/parse/risk
+        # logically happened before order submission.
         timeline = []
+
+        # Find the earliest order submit time to anchor pre-trade events
+        entry_order = next((o for o in orders if o.get("order_purpose") == "entry"), None)
+        anchor_time = (
+            (entry_order.get("submit_started_at") or entry_order.get("order_time", ""))
+            if entry_order else ""
+        )
+
         if alert:
+            # Use anchor time (order submit) if available, else alert_time
+            alert_time = anchor_time or alert.get("alert_time", "")
             timeline.append({
-                "time": alert.get("alert_time", ""),
+                "time": alert_time,
                 "event": "ALERT RECEIVED",
                 "detail": alert.get("raw_text", "")[:120],
                 "type": "alert",
+                "_priority": 0,
             })
             if alert.get("parse_result"):
                 timeline.append({
-                    "time": alert.get("alert_time", ""),
+                    "time": alert_time,
                     "event": f"PARSED → {alert.get('parse_result', '').upper()}",
                     "detail": f"{alert.get('action', '')} {ticker} {alert.get('strike', '')} {alert.get('right', '')} @ ${alert.get('entry_price', 0):.2f}" if alert.get("action") else "",
                     "type": "parse",
+                    "_priority": 1,
                 })
             if alert.get("risk_result"):
                 timeline.append({
-                    "time": alert.get("alert_time", ""),
+                    "time": alert_time,
                     "event": f"RISK → {alert.get('risk_result', '').upper()}",
                     "detail": alert.get("risk_reason", "") or "Approved",
                     "type": "risk_approved" if alert.get("risk_result") == "approved" else "risk_rejected",
+                    "_priority": 2,
                 })
 
         for o in orders:
             timeline.append({
-                "time": o.get("order_time", ""),
+                "time": o.get("submit_started_at") or o.get("order_time", ""),
                 "event": f"ORDER {o.get('order_action', '')} ({o.get('order_type', '')})",
                 "detail": f"{o.get('contracts', 0)} × {o.get('contract_symbol', '')} @ limit ${o.get('limit_price', 0):.2f}" if o.get("limit_price") else f"{o.get('contracts', 0)} × {o.get('contract_symbol', '')}",
                 "type": "order",
+                "_priority": 3,
             })
             if o.get("status") and o.get("filled_at"):
                 timeline.append({
@@ -301,6 +318,7 @@ class TradingJournal:
                     "event": f"ORDER {o.get('status', '').upper()}",
                     "detail": f"Fill @ ${o.get('fill_price', 0):.2f}" if o.get("fill_price") else "",
                     "type": "fill",
+                    "_priority": 5,
                 })
 
         for e in executions:
@@ -309,6 +327,7 @@ class TradingJournal:
                 "event": f"FILL {e.get('side', '')}",
                 "detail": f"{e.get('contracts', 0)} × ${e.get('fill_price', 0):.2f}" + (f" (commission: ${e.get('commission', 0):.2f})" if e.get("commission") else ""),
                 "type": "fill_bot" if e.get("side") == "BOT" else "fill_sld",
+                "_priority": 4,
             })
 
         for p in pnl_events:
@@ -317,10 +336,11 @@ class TradingJournal:
                 "event": f"P&L {p.get('event_type', '')}",
                 "detail": f"${p.get('realized_pnl', 0):+.2f} (entry ${p.get('entry_price', 0):.2f} → exit ${p.get('exit_price', 0):.2f})",
                 "type": "pnl_win" if (p.get("realized_pnl") or 0) > 0 else "pnl_loss",
+                "_priority": 6,
             })
 
-        # Sort timeline by time
-        timeline.sort(key=lambda x: x["time"] or "")
+        # Sort by time, then by logical pipeline order (_priority) for same-second events
+        timeline.sort(key=lambda x: (x["time"] or "", x.get("_priority", 99)))
 
         # Compute summary
         entry_price = None

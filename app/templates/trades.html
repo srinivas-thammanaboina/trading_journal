@@ -92,16 +92,16 @@
                 <tr>
                     <th>Date</th>
                     <th>Time</th>
-                    <th>Type</th>
-                    <th>Fill</th>
                     <th>Contract</th>
+                    <th>Qty</th>
                     <th>Entry</th>
                     <th>Exit</th>
                     <th>P&L</th>
+                    <th>Status</th>
                 </tr>
             </thead>
             <tbody id="trades-body">
-                <tr><td colspan="7" style="text-align:center; color:var(--text-secondary); padding:2rem;">Loading...</td></tr>
+                <tr><td colspan="8" style="text-align:center; color:var(--text-secondary); padding:2rem;">Loading...</td></tr>
             </tbody>
         </table>
         <div id="trades-pagination" style="display:flex; justify-content:center; align-items:center; gap:0.5rem; padding:0.75rem 1rem; border-top:1px solid var(--border);"></div>
@@ -121,8 +121,8 @@
                 <div class="detail-value" id="snap-contract" style="font-weight:600;"></div>
                 <div class="detail-label">Date</div>
                 <div class="detail-value" id="snap-date"></div>
-                <div class="detail-label">Type</div>
-                <div class="detail-value" id="snap-type"></div>
+                <div class="detail-label">Status</div>
+                <div class="detail-value" id="snap-status"></div>
                 <div class="detail-label">Fill Type</div>
                 <div class="detail-value" id="snap-fill-type"></div>
                 <div class="detail-label">Entry</div>
@@ -180,7 +180,7 @@ buildTimeChart('openChart', {{ time_buckets.open.total }}, {{ time_buckets.open.
 buildTimeChart('patienceChart', {{ time_buckets.patience.total }}, {{ time_buckets.patience.wins }}, {{ time_buckets.patience.losses }});
 buildTimeChart('lottoChart', {{ time_buckets.lotto.total }}, {{ time_buckets.lotto.wins }}, {{ time_buckets.lotto.losses }});
 
-// AJAX paginated trades
+// AJAX paginated trades — position-level
 function loadTrades(page) {
     const params = new URLSearchParams();
     params.set('page', page);
@@ -189,46 +189,59 @@ function loadTrades(page) {
     params.set('end', '{{ filter_end }}');
     {% if filter_ticker %}params.set('ticker', '{{ filter_ticker }}');{% endif %}
 
-    fetch('/api/trades/pnl?' + params.toString())
+    fetch('/api/trades/positions?' + params.toString())
         .then(r => r.json())
         .then(data => {
             const tbody = document.getElementById('trades-body');
             if (!data.trades || data.trades.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary);padding:2rem;">No trades found</td></tr>';
             } else {
-                tbody.innerHTML = data.trades.map(e => {
-                    const time = e.event_time ? e.event_time.substring(11, 16) : '';
-                    const pnl = e.realized_pnl || 0;
+                tbody.innerHTML = data.trades.map(t => {
+                    const time = t.entry_time ? t.entry_time.substring(11, 16) : '';
+                    const pnl = t.total_pnl || 0;
                     const pnlClass = pnl > 0 ? 'pnl-positive' : pnl < 0 ? 'pnl-negative' : 'pnl-zero';
                     const pnlSign = pnl >= 0 ? '+' : '';
-                    const isEntry = e.event_type === 'ENTRY' || e.event_type === 'OPEN';
-                    const isOpen = isEntry && e.trade_status === 'open';
-                    const badgeClass = isEntry ? 'badge-green' : (e.event_type || '').includes('CLOSE') ? 'badge-red' : 'badge-yellow';
-                    const ft = e.fill_type || '—';
-                    const ftColors = {limit: 'var(--green)', market: 'var(--yellow)', reconciled: '#ff8c00', partial: 'var(--accent)', auto_close: '#ff6b6b'};
-                    const ftColor = ftColors[ft] || 'var(--text-secondary)';
+                    const isOpen = t.status === 'open';
+                    const isPartial = t.status === 'partial';
+
+                    // Status badge
+                    let statusBadge;
+                    if (isOpen) statusBadge = '<span class="badge badge-green">OPEN</span>';
+                    else if (isPartial) statusBadge = '<span class="badge badge-yellow">PARTIAL</span>';
+                    else statusBadge = '<span class="badge badge-muted">CLOSED</span>';
+
+                    // P&L display
+                    let pnlHtml;
+                    if (isOpen) pnlHtml = '<span style="color:var(--text-secondary);">—</span>';
+                    else pnlHtml = '<span class="' + pnlClass + '">' + pnlSign + '$' + pnl.toFixed(2) + '</span>';
+
+                    // Exit price
+                    const exitHtml = t.exit_price ? '$' + t.exit_price.toFixed(2) : '—';
+
                     return '<tr class="clickable-row snapshot-row" ' +
-                        'data-position-id="' + (e.position_id || '') + '" ' +
-                        'data-ticker="' + (e.ticker || '') + '" ' +
-                        'data-contract="' + (e.contract_symbol || '') + '" ' +
-                        'data-type="' + (e.event_type || '') + '" ' +
-                        'data-fill-type="' + ft + '" ' +
-                        'data-entry="' + (e.entry_price || 0).toFixed(2) + '" ' +
-                        'data-exit="' + (e.exit_price || 0).toFixed(2) + '" ' +
-                        'data-qty="' + (e.contracts_closed || 0) + '" ' +
+                        'data-position-id="' + (t.position_id || '') + '" ' +
+                        'data-ticker="' + (t.ticker || '') + '" ' +
+                        'data-contract="' + (t.contract_symbol || '') + '" ' +
+                        'data-status="' + (t.status || '') + '" ' +
+                        'data-fill-type="' + (t.fill_type || '') + '" ' +
+                        'data-exit-label="' + (t.exit_label || '') + '" ' +
+                        'data-entry="' + (t.entry_price || 0).toFixed(2) + '" ' +
+                        'data-exit="' + (t.exit_price || 0).toFixed(2) + '" ' +
+                        'data-qty="' + (t.qty || 0) + '" ' +
+                        'data-remaining="' + (t.remaining || 0) + '" ' +
                         'data-pnl="' + pnl.toFixed(2) + '" ' +
-                        'data-date="' + (e.trade_date || '') + '" ' +
+                        'data-date="' + (t.trade_date || '') + '" ' +
                         'data-time="' + time + '" ' +
                         'onclick="showSnapshot(this)" ' +
-                        'ondblclick="window.location=\'/trade/' + (e.position_id || '') + '\'">' +
-                        '<td>' + (e.trade_date || '') + '</td>' +
+                        'ondblclick="window.location=\'/trade/' + (t.position_id || '') + '\'">' +
+                        '<td>' + (t.trade_date || '') + '</td>' +
                         '<td>' + time + '</td>' +
-                        '<td><span class="badge ' + badgeClass + '">' + (e.event_type || '') + '</span></td>' +
-                        '<td><span style="color:' + ftColor + ';font-size:0.75rem;font-weight:600;">' + ft + '</span></td>' +
-                        '<td><strong>' + (e.ticker || '') + '</strong> ' + (e.contract_symbol || '') + '</td>' +
-                        '<td>$' + (e.entry_price || 0).toFixed(2) + '</td>' +
-                        '<td>$' + (e.exit_price || 0).toFixed(2) + '</td>' +
-                        '<td class="' + (isEntry ? '' : pnlClass) + '">' + (isOpen ? '<span style="color:var(--accent);">OPEN</span>' : isEntry ? '<span style="color:var(--text-secondary);">—</span>' : pnlSign + '$' + pnl.toFixed(2)) + '</td>' +
+                        '<td><strong>' + (t.ticker || '') + '</strong> ' + (t.contract_symbol || '') + '</td>' +
+                        '<td>' + (t.qty || 0) + '</td>' +
+                        '<td>$' + (t.entry_price || 0).toFixed(2) + '</td>' +
+                        '<td>' + exitHtml + '</td>' +
+                        '<td>' + pnlHtml + '</td>' +
+                        '<td>' + statusBadge + '</td>' +
                         '</tr>';
                 }).join('');
             }
@@ -259,7 +272,7 @@ function tPgBtn(page, label) {
 
 loadTrades(1);
 
-// Snapshot
+// Snapshot — position-level
 function showSnapshot(row) {
     document.querySelectorAll('.snapshot-row').forEach(r => r.classList.remove('snapshot-active'));
     row.classList.add('snapshot-active');
@@ -270,29 +283,51 @@ function showSnapshot(row) {
     const entry = parseFloat(row.dataset.entry);
     const exit = parseFloat(row.dataset.exit);
     const pnl = parseFloat(row.dataset.pnl);
+    const status = row.dataset.status;
+    const qty = parseInt(row.dataset.qty);
+    const remaining = parseInt(row.dataset.remaining);
 
     document.getElementById('snap-contract').textContent = row.dataset.contract;
     document.getElementById('snap-date').textContent = row.dataset.date + ' ' + row.dataset.time;
-    document.getElementById('snap-type').textContent = row.dataset.type;
+
+    // Status
+    const statusEl = document.getElementById('snap-status');
+    if (status === 'open') { statusEl.textContent = 'OPEN'; statusEl.style.color = 'var(--green)'; }
+    else if (status === 'partial') { statusEl.textContent = 'PARTIAL (' + remaining + '/' + qty + ' remaining)'; statusEl.style.color = 'var(--yellow)'; }
+    else { statusEl.textContent = 'CLOSED'; statusEl.style.color = 'var(--text-secondary)'; }
+
+    // Fill type
     const fillType = row.dataset.fillType || '—';
+    const exitLabel = row.dataset.exitLabel || '';
     const ftEl = document.getElementById('snap-fill-type');
-    ftEl.textContent = fillType;
-    const ftColorMap = {limit: 'var(--green)', market: 'var(--yellow)', reconciled: '#ff8c00', partial: 'var(--accent)', auto_close: '#ff6b6b'};
+    ftEl.textContent = fillType + (exitLabel ? ' / ' + exitLabel : '');
+    const ftColorMap = {limit: 'var(--green)', market: 'var(--yellow)'};
     ftEl.style.color = ftColorMap[fillType] || 'var(--text-secondary)';
+
     document.getElementById('snap-entry').textContent = '$' + entry.toFixed(2);
-    document.getElementById('snap-exit').textContent = '$' + exit.toFixed(2);
-    document.getElementById('snap-qty').textContent = row.dataset.qty;
+    document.getElementById('snap-exit').textContent = exit > 0 ? '$' + exit.toFixed(2) : '—';
+    document.getElementById('snap-qty').textContent = qty;
 
     const pnlEl = document.getElementById('snap-pnl');
-    pnlEl.textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
-    pnlEl.style.color = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--text-secondary)';
+    if (status === 'open') {
+        pnlEl.textContent = '—';
+        pnlEl.style.color = 'var(--text-secondary)';
+    } else {
+        pnlEl.textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
+        pnlEl.style.color = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--text-secondary)';
+    }
 
     const riskPerContract = entry * 100;
-    const pnlPerContract = (exit - entry) * 100;
-    const rMult = riskPerContract > 0 ? (pnlPerContract / riskPerContract).toFixed(1) : '—';
+    const pnlPerContract = exit > 0 ? (exit - entry) * 100 : 0;
+    const rMult = riskPerContract > 0 && exit > 0 ? (pnlPerContract / riskPerContract).toFixed(1) : '—';
     const rmultEl = document.getElementById('snap-rmult');
-    rmultEl.textContent = (parseFloat(rMult) >= 0 ? '+' : '') + rMult + 'R';
-    rmultEl.style.color = parseFloat(rMult) > 0 ? 'var(--green)' : parseFloat(rMult) < 0 ? 'var(--red)' : 'var(--text-secondary)';
+    if (rMult === '—') {
+        rmultEl.textContent = '—';
+        rmultEl.style.color = 'var(--text-secondary)';
+    } else {
+        rmultEl.textContent = (parseFloat(rMult) >= 0 ? '+' : '') + rMult + 'R';
+        rmultEl.style.color = parseFloat(rMult) > 0 ? 'var(--green)' : parseFloat(rMult) < 0 ? 'var(--red)' : 'var(--text-secondary)';
+    }
 
     document.getElementById('snap-detail-link').href = '/trade/' + row.dataset.positionId;
 }

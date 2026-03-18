@@ -58,16 +58,41 @@ async def dashboard(request: Request):
     ).fetchall()
     positions = [dict(r) for r in positions]
 
-    # Recent trades with P&L (join executions with pnl_events)
-    recent_trades = conn.execute(
-        """SELECT e.*, p.realized_pnl as pnl
+    # Recent trades — one row per position (grouped)
+    recent_entries = conn.execute(
+        """SELECT e.position_id, e.ticker, e.contract_symbol, e.trade_date,
+                  MIN(e.execution_time) as entry_time,
+                  MAX(CASE WHEN e.side = 'BOT' THEN e.fill_price END) as entry_price,
+                  SUM(CASE WHEN e.side = 'BOT' THEN e.contracts ELSE 0 END) as qty
            FROM executions e
-           LEFT JOIN realized_pnl_events p
-             ON e.position_id = p.position_id AND e.trade_date = p.trade_date
-             AND e.side = 'SLD'
-           ORDER BY e.execution_time DESC LIMIT 20"""
+           GROUP BY e.position_id
+           ORDER BY MIN(e.execution_time) DESC
+           LIMIT 15"""
     ).fetchall()
-    recent_trades = [dict(r) for r in recent_trades]
+    recent_entries = [dict(r) for r in recent_entries]
+
+    # Enrich with P&L and status
+    recent_trades = []
+    for entry in recent_entries:
+        pid = entry["position_id"]
+        pnl_row = conn.execute(
+            "SELECT SUM(realized_pnl) as total_pnl, MAX(exit_price) as exit_price FROM realized_pnl_events WHERE position_id = ?",
+            (pid,),
+        ).fetchone()
+        is_open = conn.execute(
+            "SELECT 1 FROM positions WHERE position_id = ?", (pid,)
+        ).fetchone() is not None
+
+        total_pnl = round((pnl_row["total_pnl"] or 0), 2) if pnl_row else 0
+        exit_price = pnl_row["exit_price"] if pnl_row else None
+
+        status = "open" if is_open and not pnl_row["total_pnl"] else "partial" if is_open else "closed"
+        recent_trades.append({
+            **entry,
+            "total_pnl": total_pnl,
+            "exit_price": exit_price,
+            "status": status,
+        })
 
     # Today's alert stats
     alert_count = conn.execute(

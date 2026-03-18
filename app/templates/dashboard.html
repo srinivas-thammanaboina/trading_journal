@@ -68,51 +68,43 @@
 
     <!-- Recent Trades -->
     <div class="table-wrap">
-        <div class="table-header">Recent Trades <span class="table-sub">each row opens a full trade detail timeline</span></div>
+        <div class="table-header">Recent Trades <span class="table-sub">click row for full trade detail</span></div>
         <table>
             <thead>
                 <tr>
                     <th>Time</th>
                     <th>Contract</th>
-                    <th>Source</th>
-                    <th>Side</th>
-                    <th>Fill</th>
                     <th>Qty</th>
-                    <th>Price</th>
+                    <th>Entry</th>
+                    <th>Exit</th>
                     <th>P&L</th>
+                    <th>Status</th>
                 </tr>
             </thead>
             <tbody>
                 {% for t in recent_trades %}
                 <tr class="clickable-row" onclick="window.location='/trade/{{ t.position_id }}'">
-                    <td>{{ t.execution_time[11:16] if t.execution_time and t.execution_time|length > 16 else t.execution_time or '' }}</td>
+                    <td>{{ t.entry_time[11:16] if t.entry_time and t.entry_time|length > 16 else t.entry_time or '' }}</td>
                     <td><strong>{{ t.ticker }}</strong> {{ t.contract_symbol }}</td>
+                    <td>{{ t.qty }}</td>
+                    <td>${{ "%.2f"|format(t.entry_price) }}</td>
+                    <td>{% if t.exit_price %}${{ "%.2f"|format(t.exit_price) }}{% else %}—{% endif %}</td>
+                    <td class="{{ 'pnl-positive' if t.total_pnl > 0 else 'pnl-negative' if t.total_pnl < 0 else 'pnl-zero' }}">
+                        {% if t.status == 'open' %}—{% else %}{{ '+' if t.total_pnl >= 0 }}${{ "%.2f"|format(t.total_pnl) }}{% endif %}
+                    </td>
                     <td>
-                        {% if t.source %}
-                            <span class="badge {{ 'badge-blue' if t.source == 'telegram' else 'badge-purple' }}">{{ t.source }}</span>
+                        {% if t.status == 'open' %}
+                            <span class="badge badge-green">OPEN</span>
+                        {% elif t.status == 'partial' %}
+                            <span class="badge badge-yellow">PARTIAL</span>
                         {% else %}
-                            <span class="badge badge-muted">bot</span>
+                            <span class="badge badge-muted">CLOSED</span>
                         {% endif %}
-                    </td>
-                    <td>
-                        <span class="badge {{ 'badge-green' if t.side == 'BOT' else 'badge-red' }}">
-                            {% if t.side == 'BOT' %}entry{% else %}close{% endif %}
-                        </span>
-                    </td>
-                    <td>
-                        {% set ft = t.fill_type or '—' %}
-                        {% set ft_colors = {'limit': 'var(--green)', 'market': 'var(--yellow)', 'reconciled': '#ff8c00', 'partial': 'var(--accent)', 'auto_close': '#ff6b6b'} %}
-                        <span style="color:{{ ft_colors.get(ft, 'var(--text-secondary)') }};font-size:0.75rem;font-weight:600;">{{ ft }}</span>
-                    </td>
-                    <td>{{ t.contracts }}</td>
-                    <td>${{ "%.2f"|format(t.fill_price) }}</td>
-                    <td class="{{ 'pnl-positive' if (t.pnl or 0) > 0 else 'pnl-negative' if (t.pnl or 0) < 0 else 'pnl-zero' }}">
-                        {% if t.pnl %}{{ '+' if t.pnl >= 0 }}${{ "%.2f"|format(t.pnl) }}{% else %}—{% endif %}
                     </td>
                 </tr>
                 {% endfor %}
                 {% if not recent_trades %}
-                <tr><td colspan="8" style="text-align:center; color:var(--text-secondary); padding:1.5rem;">No recent trades</td></tr>
+                <tr><td colspan="7" style="text-align:center; color:var(--text-secondary); padding:1.5rem;">No recent trades</td></tr>
                 {% endif %}
             </tbody>
         </table>
