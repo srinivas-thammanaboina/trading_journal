@@ -87,8 +87,8 @@
                     <td>{{ t.entry_time[11:16] if t.entry_time and t.entry_time|length > 16 else t.entry_time or '' }}</td>
                     <td><strong>{{ t.ticker }}</strong> {{ t.contract_symbol }}</td>
                     <td>{{ t.qty }}</td>
-                    <td>${{ "%.2f"|format(t.entry_price) }}</td>
-                    <td>{% if t.exit_price %}${{ "%.2f"|format(t.exit_price) }}{% else %}—{% endif %}</td>
+                    <td>{% if t.entry_price is not none %}${{ "%.2f"|format(t.entry_price) }}{% else %}—{% endif %}</td>
+                    <td>{% if t.exit_price is not none %}${{ "%.2f"|format(t.exit_price) }}{% else %}—{% endif %}</td>
                     <td class="{{ 'pnl-positive' if t.total_pnl > 0 else 'pnl-negative' if t.total_pnl < 0 else 'pnl-zero' }}">
                         {% if t.status == 'open' %}—{% else %}{{ '+' if t.total_pnl >= 0 }}${{ "%.2f"|format(t.total_pnl) }}{% endif %}
                     </td>

@@ -88,6 +88,8 @@ async def dashboard(request: Request):
         has_exits = pnl_row and pnl_row["total_pnl"] is not None
 
         status = "open" if is_open and not has_exits else "partial" if is_open else "closed"
+        entry["entry_price"] = entry.get("entry_price") or 0.0
+        entry["qty"] = entry.get("qty") or 0
         recent_trades.append({
             **entry,
             "total_pnl": total_pnl,
