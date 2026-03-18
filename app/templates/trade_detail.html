@@ -97,30 +97,29 @@
 
     <!-- Right: Detail Panels -->
     <div>
-        <!-- Source Alert -->
-        <h2 style="font-size:1.1rem; margin-bottom:1rem; color:var(--text-primary);">Source Alert</h2>
+        <!-- Bot Action -->
+        <h2 style="font-size:1.1rem; margin-bottom:1rem; color:var(--text-primary);">Bot Action</h2>
         <div class="card" style="margin-bottom:1.5rem;">
             {% if alert %}
             <div class="detail-grid">
-                <div class="detail-label">Raw Text</div>
-                <div class="detail-value" style="font-family:monospace; font-size:0.85rem; background:var(--bg-primary); padding:0.5rem; border-radius:4px; white-space:pre-wrap;">{{ alert.raw_text }}</div>
+                <div class="detail-label">Action</div>
+                <div class="detail-value" style="font-weight:600; font-size:1rem;">
+                    {{ alert.action or '—' }} {{ alert.ticker or '' }} {{ alert.strike or '' }} {{ alert.right or '' }}
+                </div>
 
                 <div class="detail-label">Source</div>
                 <div class="detail-value">
                     <span class="badge {{ 'badge-blue' if alert.source == 'telegram' else 'badge-purple' }}">{{ alert.source }}</span>
                 </div>
 
-                <div class="detail-label">Parse Result</div>
-                <div class="detail-value">{{ alert.parse_result or '—' }}</div>
-
-                <div class="detail-label">Parsed Action</div>
-                <div class="detail-value">{{ alert.action or '—' }} {{ alert.ticker or '' }} {{ alert.strike or '' }} {{ alert.right or '' }}</div>
-
                 <div class="detail-label">Signal Price</div>
-                <div class="detail-value">${{ "%.2f"|format(alert.entry_price or 0) }}</div>
+                <div class="detail-value" style="font-family:var(--font-mono);">${{ "%.2f"|format(alert.entry_price or 0) }}</div>
 
                 <div class="detail-label">Signal Stop</div>
-                <div class="detail-value">${{ "%.2f"|format(alert.stop_price or 0) }}</div>
+                <div class="detail-value" style="font-family:var(--font-mono);">{% if alert.stop_price %}${{ "%.2f"|format(alert.stop_price) }}{% else %}—{% endif %}</div>
+
+                <div class="detail-label">Contracts</div>
+                <div class="detail-value">{{ alert.contracts or summary.contracts or '—' }}</div>
 
                 <div class="detail-label">Risk Decision</div>
                 <div class="detail-value">
@@ -138,6 +137,11 @@
                     <span class="badge {{ 'badge-green' if alert.outcome == 'filled' else 'badge-red' if alert.outcome == 'rejected' else 'badge-yellow' }}">
                         {{ alert.outcome }}
                     </span>
+                </div>
+
+                <div class="detail-label">Fill Price</div>
+                <div class="detail-value" style="font-family:var(--font-mono);">
+                    {% if summary.entry_price %}${{ "%.2f"|format(summary.entry_price) }}{% else %}—{% endif %}
                 </div>
             </div>
             {% else %}
