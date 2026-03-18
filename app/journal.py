@@ -321,7 +321,7 @@ class TradingJournal:
             timeline.append({
                 "time": o.get("submit_started_at") or o.get("order_time", ""),
                 "event": f"ORDER {o.get('order_action', '')} ({o.get('order_type', '')})",
-                "detail": f"{o.get('contracts', 0)} × {o.get('contract_symbol', '')} @ limit ${o.get('limit_price', 0):.2f}" if o.get("limit_price") else f"{o.get('contracts', 0)} × {o.get('contract_symbol', '')}",
+                "detail": f"{o.get('contracts', 0)} × {o.get('contract_symbol', '')}" + (f" @ limit ${o['limit_price']:.2f}" if o.get("limit_price") and o.get("order_type") == "LMT" and o["limit_price"] < 100000 else ""),
                 "type": "order",
                 "_priority": 3,
             })
