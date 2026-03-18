@@ -188,11 +188,23 @@ class TradingJournal:
             (position_id,),
         ).fetchall()]
 
-        # All orders for this position
+        # All orders for this position (by position_id, or by time-proximity if position_id is NULL)
         orders = [dict(r) for r in self.conn.execute(
             "SELECT * FROM orders WHERE position_id = ? ORDER BY order_time",
             (position_id,),
         ).fetchall()]
+
+        if not orders and executions:
+            # position_id may be NULL in orders table — match by time proximity to entry fill
+            entry_exec = next((e for e in executions if e.get("side") == "BOT"), None)
+            if entry_exec and entry_exec.get("execution_time") and trade_date:
+                orders = [dict(r) for r in self.conn.execute(
+                    """SELECT * FROM orders
+                       WHERE trade_date = ? AND order_purpose = 'entry'
+                       ORDER BY ABS(julianday(submit_started_at) - julianday(?))
+                       LIMIT 1""",
+                    (trade_date, entry_exec["execution_time"]),
+                ).fetchall()]
 
         # All P&L events
         pnl_events = [dict(r) for r in self.conn.execute(
