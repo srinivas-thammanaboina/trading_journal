@@ -474,58 +474,33 @@
     </div>
 </div>
 
-<!-- ══════ RECENT ORDERS TABLE ══════ -->
+<!-- ══════ EXECUTION LATENCY PERCENTILES ══════ -->
 <div class="card" style="margin-bottom:2rem;">
-    <div class="chart-title">Recent Orders</div>
-    <div class="chart-sub">Latest instrumented orders with full metrics</div>
+    <div class="chart-title">Execution Latency Percentiles</div>
+    <div class="chart-sub">End-to-end order execution time distribution</div>
     <div class="table-wrap" style="border:none;">
         <table>
             <thead>
                 <tr>
-                    <th>Time</th>
-                    <th>Ticker</th>
-                    <th>Type</th>
-                    <th>Action</th>
-                    <th>Qty</th>
-                    <th>Limit</th>
-                    <th>Fill</th>
-                    <th>Mid</th>
-                    <th>Slippage</th>
-                    <th>Latency</th>
-                    <th>Status</th>
+                    <th>Percentile</th>
+                    <th>Submit → ACK</th>
+                    <th>Submit → Fill</th>
+                    <th>Total Latency</th>
                 </tr>
             </thead>
             <tbody>
-                {% for o in recent_orders %}
+                {% for p in latency_percentiles %}
                 <tr>
-                    <td style="font-size:0.8rem;">{{ o.order_time[11:19] if o.order_time and o.order_time|length > 19 else o.order_time or '—' }}</td>
-                    <td><strong>{{ o.ticker }}</strong></td>
-                    <td>{{ o.order_type }}</td>
-                    <td>
-                        <span class="badge {{ 'badge-green' if o.order_action == 'BUY' else 'badge-red' }}">{{ o.order_action }}</span>
-                    </td>
-                    <td>{{ o.contracts }}</td>
-                    <td>{{ "$%.2f"|format(o.limit_price) if o.limit_price else '—' }}</td>
-                    <td>{{ "$%.2f"|format(o.fill_price) if o.fill_price else '—' }}</td>
-                    <td>{{ "$%.2f"|format(o.reference_mid) if o.reference_mid else '—' }}</td>
-                    <td>
-                        {% if o.fill_price and o.reference_mid and o.reference_mid > 0 %}
-                            {% set slip = o.fill_price - o.reference_mid if o.order_action == 'BUY' else o.reference_mid - o.fill_price %}
-                            <span class="{{ 'positive' if slip <= 0.05 else 'negative' }}">${{ "%.4f"|format(slip) }}</span>
-                        {% else %}—{% endif %}
-                    </td>
-                    <td>{{ "%.0f"|format(o.total_latency_ms or 0) }}ms</td>
-                    <td>
-                        {% if o.status == 'filled' %}<span class="badge badge-green">filled</span>
-                        {% elif o.status == 'failed' %}<span class="badge badge-red">failed</span>
-                        {% elif o.status == 'escalated' %}<span class="badge" style="background:#f39c12;">escalated</span>
-                        {% else %}<span class="badge">{{ o.status }}</span>{% endif %}
-                        {% if o.escalated %}<span style="color:#f39c12; font-size:0.7rem;"> ESC</span>{% endif %}
+                    <td><strong>P{{ p.percentile }}</strong></td>
+                    <td>{{ "%.0f"|format(p.submit_to_ack_ms or 0) }}ms</td>
+                    <td>{{ "%.0f"|format(p.submit_to_fill_ms or 0) }}ms</td>
+                    <td class="{% if (p.total_ms or 0) < 2000 %}positive{% elif (p.total_ms or 0) < 10000 %}{% else %}negative{% endif %}">
+                        {{ "%.0f"|format(p.total_ms or 0) }}ms
                     </td>
                 </tr>
                 {% endfor %}
-                {% if not recent_orders %}
-                <tr><td colspan="11" style="text-align:center; color:var(--text-secondary);">No instrumented orders yet</td></tr>
+                {% if not latency_percentiles %}
+                <tr><td colspan="4" style="text-align:center; color:var(--text-secondary);">No latency data yet</td></tr>
                 {% endif %}
             </tbody>
         </table>

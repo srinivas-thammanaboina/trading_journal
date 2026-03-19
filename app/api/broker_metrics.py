@@ -370,6 +370,38 @@ async def get_broker_metrics(request: Request, start: str = "", end: str = "", t
     except Exception:
         fill_types = []
 
+    # --- Latency percentiles (P95, P99, P99.5, P99.95) ---
+    latency_percentiles = []
+    try:
+        # Get all latency values sorted, then pick percentiles by row position
+        all_latencies_sql = f"""
+            SELECT
+                total_latency_ms,
+                CASE WHEN submit_started_at IS NOT NULL AND ack_received_at IS NOT NULL
+                     THEN ROUND((julianday(ack_received_at) - julianday(submit_started_at)) * 86400000, 0)
+                     ELSE NULL END as submit_to_ack_ms,
+                CASE WHEN submit_started_at IS NOT NULL AND first_fill_at IS NOT NULL
+                     THEN ROUND((julianday(first_fill_at) - julianday(submit_started_at)) * 86400000, 0)
+                     ELSE NULL END as submit_to_fill_ms
+            FROM orders o {where}
+            AND total_latency_ms IS NOT NULL
+            ORDER BY total_latency_ms ASC
+        """
+        rows = conn.execute(all_latencies_sql, params).fetchall()
+        n = len(rows)
+        if n > 0:
+            for pct_label, pct_value in [("50", 0.50), ("95", 0.95), ("99", 0.99), ("99.5", 0.995), ("99.95", 0.9995)]:
+                idx = min(int(pct_value * n), n - 1)
+                row = rows[idx]
+                latency_percentiles.append({
+                    "percentile": pct_label,
+                    "total_ms": row["total_latency_ms"],
+                    "submit_to_ack_ms": row["submit_to_ack_ms"],
+                    "submit_to_fill_ms": row["submit_to_fill_ms"],
+                })
+    except Exception:
+        latency_percentiles = []
+
     # --- System notes ---
     notes = []
     total_orders = latency.get("total_orders", 0)
@@ -422,4 +454,5 @@ async def get_broker_metrics(request: Request, start: str = "", end: str = "", t
         "order_events": events,
         "fill_types": fill_types,
         "notes": notes,
+        "latency_percentiles": latency_percentiles,
     }
