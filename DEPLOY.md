@@ -21,7 +21,7 @@ Droplet
 
 | Variable | Description | Example |
 |---|---|---|
-| `$DROPLET_IP` | Droplet public IP | `24.199.94.205` |
+| `$DROPLET_IP` | Droplet public IP | `$DROPLET_IP` |
 | `$BOT_DIR` | Bot repo path on droplet | `/app/spx_trader` |
 | `$JOURNAL_DIR` | Journal repo path on droplet | `/app/trading_journal` |
 | `$BOT_CONTAINER` | Bot container name | `spx_trader_spx-trader_1` |

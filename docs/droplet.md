@@ -6,7 +6,7 @@ Quick reference for managing the Trading Journal on the DigitalOcean droplet.
 
 | Variable | Description | Example |
 |---|---|---|
-| `DROPLET_IP` | Your droplet's public IP | `24.199.94.205` |
+| `DROPLET_IP` | Your droplet's public IP | `$DROPLET_IP` |
 | `BOT_DIR` | Bot code directory (has docker-compose.yml) | `/app/spx_trader` |
 | `JOURNAL_DIR` | Journal code directory | `/app/trading_journal` |
 | `DB_PATH` | SQLite database (written by bot, read by journal) | `BOT_DIR/state/trading_journal.db` |
