@@ -192,47 +192,56 @@ async def get_broker_metrics(request: Request, start: str = "", end: str = "", t
     order_flow["reject_rate"] = round(order_flow.get("failed", 0) / total * 100, 1)
 
     # --- Gateway health ---
-    # system_state table has: trade_date, daily_realized_pnl, daily_unrealized_pnl,
-    # halted, halt_reason, last_reconcile_time, updated_at
-    # gateway_connected column does NOT exist yet — derive status from updated_at recency
+    # system_state has gateway_connected (0/1) updated by bot on connect/disconnect
+    # gateway_events (schema v5) tracks reconnect count and disconnect duration
     try:
         gw_row = conn.execute(
-            "SELECT updated_at, trade_date, halted FROM system_state ORDER BY trade_date DESC LIMIT 1"
+            "SELECT updated_at, trade_date, halted, gateway_connected FROM system_state ORDER BY trade_date DESC LIMIT 1"
         ).fetchone()
         if gw_row:
             last_sync = gw_row["updated_at"]
-            # Consider "connected" if last state update was within the last 5 minutes
-            from datetime import datetime, timedelta, timezone
+            is_connected = bool(gw_row["gateway_connected"]) if gw_row["gateway_connected"] is not None else False
+
+            # Query gateway_events for today's reconnect stats
+            reconnect_count = None
+            total_disconnect_ms = None
             try:
-                sync_time = datetime.fromisoformat(last_sync) if last_sync else None
-                # Ensure timezone-aware for comparison
-                if sync_time and sync_time.tzinfo is None:
-                    sync_time = sync_time.replace(tzinfo=timezone.utc)
-                now = datetime.now(timezone.utc)
-                is_recent = sync_time and (now - sync_time) < timedelta(minutes=5)
+                today = gw_row["trade_date"]
+                rc_row = conn.execute(
+                    "SELECT COUNT(*) as cnt FROM gateway_events WHERE event_type='reconnect_success' AND date(event_time)=?",
+                    (today,)
+                ).fetchone()
+                reconnect_count = rc_row["cnt"] if rc_row else 0
+
+                dur_row = conn.execute(
+                    "SELECT SUM(duration_ms) as total FROM gateway_events WHERE event_type='reconnect_success' AND duration_ms IS NOT NULL AND date(event_time)=?",
+                    (today,)
+                ).fetchone()
+                total_disconnect_ms = dur_row["total"] if dur_row and dur_row["total"] else 0
             except Exception:
-                is_recent = False
+                pass  # gateway_events table may not exist on older schemas
+
             gateway_health = {
-                "connected": is_recent,
+                "connected": is_connected,
                 "last_sync": last_sync,
                 "trade_date": gw_row["trade_date"],
-                "market_data": "Live" if is_recent else "Stale",
+                "market_data": "Live" if is_connected else "Stale",
                 "halted": bool(gw_row["halted"]),
-                "reconnects": None,  # Not tracked in DB yet (Phase 2)
-                "disconnect_duration": None,  # Not tracked in DB yet (Phase 2)
-                "uptime_pct": None,  # Not tracked in DB yet (Phase 2)
+                "reconnects": reconnect_count,
+                "disconnect_duration": f"{total_disconnect_ms / 1000:.1f}s" if total_disconnect_ms else "0s",
+                "uptime_pct": None,
             }
         else:
             gateway_health = {
                 "connected": False, "last_sync": None, "trade_date": None,
-                "market_data": "Unknown", "halted": False, "reconnects": None,
-                "disconnect_duration": None, "uptime_pct": None,
+                "market_data": "Unknown", "halted": False, "reconnects": 0,
+                "disconnect_duration": "0s", "uptime_pct": None,
             }
     except Exception:
         gateway_health = {
             "connected": False, "last_sync": None, "trade_date": None,
-            "market_data": "Unknown", "halted": False, "reconnects": None,
-            "disconnect_duration": None, "uptime_pct": None,
+            "market_data": "Unknown", "halted": False, "reconnects": 0,
+            "disconnect_duration": "0s", "uptime_pct": None,
         }
 
     # --- Recent errors ---
