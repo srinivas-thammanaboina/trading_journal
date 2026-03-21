@@ -192,5 +192,38 @@
         createEquityCurve('equityChart', pnlData);
         createDailyBars('dailyBarsChart', pnlData.slice(-5));
     }
+
+    // Auto-refresh every 30 seconds during market hours (9:30 AM - 4:15 PM ET)
+    (function() {
+        const REFRESH_INTERVAL = 30000; // 30 seconds
+        let countdown = REFRESH_INTERVAL / 1000;
+
+        // Add refresh indicator to page
+        const indicator = document.createElement('div');
+        indicator.id = 'refresh-indicator';
+        indicator.style.cssText = 'position:fixed;bottom:1rem;right:1rem;background:var(--card-bg,#1e1e2e);color:var(--text-secondary,#888);padding:0.4rem 0.8rem;border-radius:6px;font-size:0.75rem;z-index:1000;border:1px solid var(--border,#333);cursor:pointer;';
+        indicator.title = 'Click to refresh now';
+        document.body.appendChild(indicator);
+
+        function updateIndicator() {
+            indicator.textContent = '↻ ' + countdown + 's';
+        }
+
+        function refresh() {
+            location.reload();
+        }
+
+        indicator.addEventListener('click', refresh);
+
+        setInterval(function() {
+            countdown--;
+            if (countdown <= 0) {
+                refresh();
+            }
+            updateIndicator();
+        }, 1000);
+
+        updateIndicator();
+    })();
 </script>
 {% endblock %}
