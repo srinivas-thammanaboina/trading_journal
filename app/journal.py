@@ -390,6 +390,40 @@ class TradingJournal:
             "is_open": position is not None,
         }
 
+        # Exit alerts + guru signals — one per SLD execution, matched by time proximity
+        exit_signals = []
+        for sell_exec in side_exits:
+            sell_time = sell_exec.get("execution_time", "")
+            sell_date = sell_exec.get("trade_date", trade_date)
+            if not sell_time:
+                continue
+
+            # Find closest SELL/CLOSE alert to this execution
+            exit_alert = self.conn.execute(
+                """SELECT * FROM alerts
+                   WHERE trade_date = ? AND ticker = ?
+                     AND action IN ('SELL', 'CLOSE')
+                   ORDER BY ABS(julianday(alert_time) - julianday(?))
+                   LIMIT 1""",
+                (sell_date, ticker, sell_time),
+            ).fetchone()
+
+            # Find closest SELL/CLOSE guru signal
+            exit_guru = self.conn.execute(
+                """SELECT * FROM guru_signals
+                   WHERE trade_date = ? AND ticker = ?
+                     AND action IN ('CLOSE', 'PARTIAL_CLOSE')
+                   ORDER BY ABS(julianday(signal_time) - julianday(?))
+                   LIMIT 1""",
+                (sell_date, ticker, sell_time),
+            ).fetchone()
+
+            exit_signals.append({
+                "execution": dict(sell_exec),
+                "alert": dict(exit_alert) if exit_alert else None,
+                "guru_signal": dict(exit_guru) if exit_guru else None,
+            })
+
         return {
             "summary": summary,
             "position": position,
@@ -398,6 +432,7 @@ class TradingJournal:
             "pnl_events": pnl_events,
             "alert": alert,
             "guru_signal": guru_signal,
+            "exit_signals": exit_signals,
             "timeline": timeline,
         }
 

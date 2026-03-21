@@ -632,6 +632,7 @@ tbody tr:hover { background: rgba(88, 166, 255, 0.03); }
 }
 
 .timeline-item:last-child { border-bottom: none; }
+.timeline-clickable:hover { background: rgba(255,255,255,0.03); border-radius: 4px; }
 
 .timeline-dot {
     width: 10px;

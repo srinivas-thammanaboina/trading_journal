@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Trade {{ summary.position_id }} - Trading Journal{% endblock %}
+{% block title %}{{ summary.contract or summary.ticker or 'Trade' }} - Trading Journal{% endblock %}
 
 {% block content %}
 <div style="margin-bottom:1rem;">
@@ -51,10 +51,7 @@
             {{ summary.remaining|default(0) }} / {{ summary.contracts }}
         </div>
     </div>
-    <div class="card">
-        <div class="label">Position ID</div>
-        <div class="value neutral" style="font-size:0.85rem; word-break:break-all;">{{ summary.position_id }}</div>
-    </div>
+
 </div>
 
 <!-- Two-column layout: Timeline + Details -->
@@ -66,8 +63,15 @@
         <div class="card" style="padding:0;">
             {% if timeline %}
             <div class="timeline">
+                {% set sld_index = namespace(n=0) %}
                 {% for event in timeline %}
-                <div class="timeline-item">
+                <div class="timeline-item {% if event.type == 'fill_sld' %}timeline-clickable{% endif %}"
+                     {% if event.type == 'fill_sld' %}
+                     onclick="showExitSignal({{ sld_index.n }})" title="Click to view exit signal details"
+                     {% elif event.type == 'fill_bot' %}
+                     onclick="showEntrySignal()" title="Click to view entry signal details"
+                     {% endif %}
+                     {% if event.type in ('fill_bot', 'fill_sld') %}style="cursor:pointer;"{% endif %}>
                     <div class="timeline-dot
                         {% if event.type == 'alert' %}dot-blue
                         {% elif event.type == 'parse' %}dot-cyan
@@ -83,10 +87,11 @@
                     "></div>
                     <div class="timeline-content">
                         <div class="timeline-time">{{ event.time[11:19] if event.time|length > 19 else event.time }}</div>
-                        <div class="timeline-event">{{ event.event }}</div>
+                        <div class="timeline-event">{{ event.event }}{% if event.type in ('fill_bot', 'fill_sld') %} <span style="font-size:0.7rem; color:var(--text-secondary);">🔍 click</span>{% endif %}</div>
                         <div class="timeline-detail">{{ event.detail }}</div>
                     </div>
                 </div>
+                {% if event.type == 'fill_sld' %}{% set sld_index.n = sld_index.n + 1 %}{% endif %}
                 {% endfor %}
             </div>
             {% else %}
@@ -95,8 +100,9 @@
         </div>
     </div>
 
-    <!-- Right: Detail Panels -->
-    <div>
+    <!-- Right: Detail Panels (swappable between entry and exit) -->
+    <div id="detail-panels">
+        <div id="panel-label" style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:0.5rem;">📥 ENTRY SIGNAL</div>
         <!-- Bot Action -->
         <h2 style="font-size:1.1rem; margin-bottom:1rem; color:var(--text-primary);">Bot Action</h2>
         <div class="card" style="margin-bottom:1.5rem;">
@@ -308,4 +314,70 @@
     </table>
 </div>
 {% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Exit signals data from server
+const exitSignals = {{ exit_signals | default([]) | tojson }};
+
+// Save original entry panels HTML
+const detailPanels = document.getElementById('detail-panels');
+const panelLabel = document.getElementById('panel-label');
+const entryHTML = detailPanels.innerHTML;
+
+function showExitSignal(index) {
+    if (index >= exitSignals.length) return;
+    const sig = exitSignals[index];
+    const exec = sig.execution || {};
+    const alert = sig.alert || {};
+    const guru = sig.guru_signal || {};
+
+    const exitNum = index + 1;
+    const fillPrice = (exec.fill_price || 0).toFixed(2);
+    const contracts = exec.contracts || 0;
+
+    let html = `<div id="panel-label" style="font-size:0.75rem; color:var(--accent-orange,#f0a030); margin-bottom:0.5rem;">📤 EXIT SIGNAL #${exitNum}</div>`;
+
+    // Bot Action for exit
+    html += `<h2 style="font-size:1.1rem; margin-bottom:1rem; color:var(--text-primary);">Bot Action (Exit)</h2>`;
+    html += `<div class="card" style="margin-bottom:1.5rem;"><div class="detail-grid">`;
+    html += `<div class="detail-label">Action</div><div class="detail-value" style="font-weight:600;">SELL ${exec.contracts || ''} × ${exec.contract_symbol || ''}</div>`;
+    html += `<div class="detail-label">Fill Time</div><div class="detail-value" style="font-family:var(--font-mono);">${(exec.execution_time || '').substring(11, 19)}</div>`;
+    html += `<div class="detail-label">Fill Price</div><div class="detail-value" style="font-family:var(--font-mono);">$${fillPrice}</div>`;
+    html += `<div class="detail-label">Fill Type</div><div class="detail-value"><span class="badge badge-yellow">${exec.fill_type || 'market'}</span></div>`;
+
+    if (alert.action) {
+        html += `<div class="detail-label">Risk Decision</div><div class="detail-value"><span class="badge ${alert.risk_result === 'approved' ? 'badge-green' : 'badge-red'}">${alert.risk_result || '—'}</span></div>`;
+        html += `<div class="detail-label">Signal Price</div><div class="detail-value" style="font-family:var(--font-mono);">$${(alert.entry_price || 0).toFixed(2)}</div>`;
+    }
+    html += `</div></div>`;
+
+    // Guru Signal for exit
+    html += `<h2 style="font-size:1.1rem; margin-bottom:1rem; color:var(--text-primary);">Guru Signal (Exit)</h2>`;
+    html += `<div class="card" style="margin-bottom:1.5rem;">`;
+    if (guru.raw_text) {
+        html += `<div class="detail-grid">`;
+        html += `<div class="detail-label">Raw Text</div><div class="detail-value" style="font-family:monospace; font-size:0.85rem; background:var(--bg-primary); padding:0.5rem; border-radius:4px;">${guru.raw_text}</div>`;
+        html += `<div class="detail-label">Source</div><div class="detail-value"><span class="badge badge-blue">${guru.source || 'telegram'}</span></div>`;
+        html += `<div class="detail-label">Guru Exit Price</div><div class="detail-value">$${(guru.exit_price || 0).toFixed(2)}</div>`;
+        if (guru.exit_price && exec.fill_price) {
+            const gap = exec.fill_price - guru.exit_price;
+            const gapColor = gap >= 0 ? 'var(--green)' : 'var(--red)';
+            html += `<div class="detail-label">Price Gap</div><div class="detail-value" style="color:${gapColor}; font-weight:600;">$${gap.toFixed(2)} (bot vs guru)</div>`;
+        }
+        html += `</div>`;
+    } else {
+        html += `<div style="color:var(--text-secondary);">No linked guru exit signal found</div>`;
+    }
+    html += `</div>`;
+
+    detailPanels.innerHTML = html;
+}
+
+function showEntrySignal() {
+    detailPanels.innerHTML = entryHTML;
+}
+</script>
 {% endblock %}
