@@ -470,10 +470,39 @@ async def get_broker_metrics(request: Request, start: str = "", end: str = "", t
 
         ack_hist = _bin_counts(ack_vals) if ack_vals else []
         fill_hist = _bin_counts(fill_vals) if fill_vals else []
+
+        # Total duration histogram (wider buckets for end-to-end)
+        total_dur_sql = f"""
+            SELECT total_latency_ms FROM orders o {where}
+            AND total_latency_ms IS NOT NULL
+            ORDER BY total_latency_ms ASC
+        """
+        td_rows = conn.execute(total_dur_sql, params).fetchall()
+        total_dur_vals = [r["total_latency_ms"] for r in td_rows]
+
+        td_bin_edges = [0, 1000, 2000, 5000, 10000, 20000, 999999]
+        def _td_bin(vals):
+            counts = [0] * (len(td_bin_edges) - 1)
+            for v in vals:
+                for j in range(len(td_bin_edges) - 1):
+                    if v < td_bin_edges[j + 1]:
+                        counts[j] += 1
+                        break
+                else:
+                    counts[-1] += 1
+            return counts
+
+        total_dur_hist = _td_bin(total_dur_vals) if total_dur_vals else []
+        avg_total_dur = round(sum(total_dur_vals) / len(total_dur_vals)) if total_dur_vals else 0
+        p95_total_dur = total_dur_vals[min(int(len(total_dur_vals) * 0.95), len(total_dur_vals) - 1)] if total_dur_vals else 0
+        n_total_dur = len(total_dur_vals)
     except Exception:
         ack_hist = []
         fill_hist = []
-        pass
+        total_dur_hist = []
+        avg_total_dur = 0
+        p95_total_dur = 0
+        n_total_dur = 0
 
     # --- System notes ---
     notes = []
@@ -535,4 +564,9 @@ async def get_broker_metrics(request: Request, start: str = "", end: str = "", t
         "ack_hist": ack_hist,
         "fill_hist": fill_hist,
         "hist_labels": ["<0.5s", "0.5-1s", "1-2s", "2-5s", "5-10s", "10-20s", "20s+"],
+        "total_dur_hist": total_dur_hist,
+        "total_dur_labels": ["<1s", "1-2s", "2-5s", "5-10s", "10-20s", "20s+"],
+        "avg_total_dur": avg_total_dur,
+        "p95_total_dur": p95_total_dur,
+        "n_total_dur": n_total_dur,
     }

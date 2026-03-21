@@ -162,17 +162,38 @@
         </div>
     </div>
 
-    <!-- Zone 3: Distribution Chart (bars + curves) -->
-    {% if ack_hist or fill_hist %}
-    <div style="margin-bottom:1.25rem;">
-        <div style="display:flex; justify-content:space-between; align-items:baseline;">
-            <div style="font-size:0.75rem; color:var(--text-muted);">Latency Distribution</div>
-            <div style="font-size:0.6rem; color:var(--text-muted); opacity:0.6;">Bars = actual bucket % &nbsp;|&nbsp; Curves = smoothed trend</div>
+    <!-- Zone 3: Dual Distribution Charts -->
+    {% if ack_hist or fill_hist or total_dur_hist %}
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1.25rem;">
+        <!-- LEFT: Execution Latency Distribution -->
+        <div>
+            <div style="font-size:0.8rem; font-weight:600; color:var(--text-primary); margin-bottom:0.15rem;">Execution Latency Distribution</div>
+            <div style="font-size:0.6rem; color:var(--text-muted); margin-bottom:0.5rem;">Broker order lifecycle</div>
+            <div style="height:200px;">
+                <canvas id="latencyDistChart"></canvas>
+            </div>
         </div>
-        <div style="height:200px; margin-top:0.4rem;">
-            <canvas id="latencyDistChart"></canvas>
+        <!-- RIGHT: Total Duration Distribution -->
+        <div>
+            <div style="display:flex; justify-content:space-between; align-items:baseline;">
+                <div>
+                    <div style="font-size:0.8rem; font-weight:600; color:var(--text-primary); margin-bottom:0.15rem;">Total Duration Distribution</div>
+                    <div style="font-size:0.6rem; color:var(--text-muted); margin-bottom:0.5rem;">Full pipeline: alert &rarr; fill</div>
+                </div>
+                {% if avg_total_dur %}
+                <div style="font-size:0.65rem; color:var(--text-muted); text-align:right; line-height:1.4;">
+                    Avg <strong style="color:#e2a745;">{{ avg_total_dur }}ms</strong>
+                    &nbsp; P95 <strong style="color:#e2a745;">{{ p95_total_dur }}ms</strong>
+                    &nbsp; <span style="opacity:0.6;">n={{ n_total_dur }}</span>
+                </div>
+                {% endif %}
+            </div>
+            <div style="height:200px;">
+                <canvas id="totalDurChart"></canvas>
+            </div>
         </div>
     </div>
+    <div style="text-align:right; font-size:0.6rem; color:var(--text-muted); opacity:0.5; margin-top:-0.75rem; margin-bottom:1rem;">Bars = actual bucket % &nbsp;|&nbsp; Curves = smoothed trend</div>
     {% endif %}
 
     <!-- Zone 4: Operational Footer -->
@@ -325,150 +346,125 @@
     </ul>
 </div>
 
-{% if ack_hist or fill_hist %}
+{% if ack_hist or fill_hist or total_dur_hist %}
 <script>
 (function() {
-    const ctx = document.getElementById('latencyDistChart');
-    if (!ctx) return;
+    // Shared Y-axis style
+    const yAxis = {
+        beginAtZero: true,
+        ticks: { color: 'rgba(255,255,255,0.4)', font: { size: 9 }, callback: v => v + '%' },
+        grid: { color: 'rgba(255,255,255,0.05)' },
+        title: { display: true, text: '% of orders', color: 'rgba(255,255,255,0.3)', font: { size: 9 } },
+    };
+    const xAxis = {
+        ticks: { color: 'rgba(255,255,255,0.45)', font: { size: 9 } },
+        grid: { color: 'rgba(255,255,255,0.04)' },
+    };
 
-    const labels = {{ hist_labels | tojson }};
-    const ackData = {{ ack_hist | tojson }};
-    const fillData = {{ fill_hist | tojson }};
+    // ── LEFT: Execution Latency Distribution ──
+    const ctx1 = document.getElementById('latencyDistChart');
+    if (ctx1) {
+        const labels = {{ hist_labels | tojson }};
+        const ackData = {{ ack_hist | tojson }};
+        const fillData = {{ fill_hist | tojson }};
+        const ackTotal = ackData.reduce((a, b) => a + b, 0) || 1;
+        const fillTotal = fillData.reduce((a, b) => a + b, 0) || 1;
+        const ackPct = ackData.map(v => +(v / ackTotal * 100).toFixed(1));
+        const fillPct = fillData.map(v => +(v / fillTotal * 100).toFixed(1));
 
-    const ackTotal = ackData.reduce((a, b) => a + b, 0) || 1;
-    const fillTotal = fillData.reduce((a, b) => a + b, 0) || 1;
-    const ackPct = ackData.map(v => +(v / ackTotal * 100).toFixed(1));
-    const fillPct = fillData.map(v => +(v / fillTotal * 100).toFixed(1));
-
-    new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: labels,
-            datasets: [
-                // Bars first (rendered behind lines)
-                {
-                    label: 'Ack (bucket)',
-                    data: ackPct,
-                    type: 'bar',
-                    backgroundColor: 'rgba(78, 205, 196, 0.25)',
-                    borderColor: 'rgba(78, 205, 196, 0.45)',
-                    borderWidth: 1,
-                    borderRadius: 3,
-                    categoryPercentage: 0.7,
-                    barPercentage: 0.85,
-                    order: 2,
-                },
-                {
-                    label: 'Fill (bucket)',
-                    data: fillPct,
-                    type: 'bar',
-                    backgroundColor: 'rgba(243, 156, 18, 0.22)',
-                    borderColor: 'rgba(243, 156, 18, 0.40)',
-                    borderWidth: 1,
-                    borderRadius: 3,
-                    categoryPercentage: 0.7,
-                    barPercentage: 0.85,
-                    order: 2,
-                },
-                // Smooth curves on top
-                {
-                    label: 'Ack (trend)',
-                    data: ackPct,
-                    type: 'line',
-                    borderColor: '#4ecdc4',
-                    backgroundColor: 'rgba(78, 205, 196, 0.06)',
-                    borderWidth: 2.5,
-                    fill: true,
-                    tension: 0.4,
-                    pointRadius: 4,
-                    pointBackgroundColor: '#4ecdc4',
-                    pointBorderColor: '#0d1117',
-                    pointBorderWidth: 2,
-                    order: 1,
-                },
-                {
-                    label: 'Fill (trend)',
-                    data: fillPct,
-                    type: 'line',
-                    borderColor: '#f39c12',
-                    backgroundColor: 'rgba(243, 156, 18, 0.05)',
-                    borderWidth: 2.5,
-                    fill: true,
-                    tension: 0.4,
-                    pointRadius: 4,
-                    pointBackgroundColor: '#f39c12',
-                    pointBorderColor: '#0d1117',
-                    pointBorderWidth: 2,
-                    order: 1,
-                },
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
-            plugins: {
-                legend: {
-                    display: true,
-                    position: 'top',
-                    align: 'end',
-                    labels: {
-                        color: 'rgba(255,255,255,0.5)',
-                        font: { size: 10 },
-                        boxWidth: 14,
-                        boxHeight: 8,
-                        padding: 10,
-                        generateLabels: function(chart) {
-                            return [
+        new Chart(ctx1, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [
+                    { data: ackPct, type: 'bar', backgroundColor: 'rgba(78,205,196,0.25)', borderColor: 'rgba(78,205,196,0.45)', borderWidth: 1, borderRadius: 3, categoryPercentage: 0.7, barPercentage: 0.85, order: 2 },
+                    { data: fillPct, type: 'bar', backgroundColor: 'rgba(243,156,18,0.22)', borderColor: 'rgba(243,156,18,0.40)', borderWidth: 1, borderRadius: 3, categoryPercentage: 0.7, barPercentage: 0.85, order: 2 },
+                    { data: ackPct, type: 'line', borderColor: '#4ecdc4', backgroundColor: 'rgba(78,205,196,0.06)', borderWidth: 2.5, fill: true, tension: 0.4, pointRadius: 3, pointBackgroundColor: '#4ecdc4', pointBorderColor: '#0d1117', pointBorderWidth: 1.5, order: 1 },
+                    { data: fillPct, type: 'line', borderColor: '#f39c12', backgroundColor: 'rgba(243,156,18,0.05)', borderWidth: 2.5, fill: true, tension: 0.4, pointRadius: 3, pointBackgroundColor: '#f39c12', pointBorderColor: '#0d1117', pointBorderWidth: 1.5, order: 1 },
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: {
+                        display: true, position: 'top', align: 'end',
+                        labels: {
+                            color: 'rgba(255,255,255,0.5)', font: { size: 9 }, boxWidth: 12, boxHeight: 8, padding: 8,
+                            generateLabels: () => [
                                 { text: 'Submit → Ack', fillStyle: '#4ecdc4', strokeStyle: '#4ecdc4', lineWidth: 0, fontColor: 'rgba(255,255,255,0.55)' },
                                 { text: 'Submit → Fill', fillStyle: '#f39c12', strokeStyle: '#f39c12', lineWidth: 0, fontColor: 'rgba(255,255,255,0.55)' },
-                            ];
-                        },
-                    }
-                },
-                tooltip: {
-                    filter: function(item) {
-                        // Only show tooltip for bar datasets (index 0,1), skip line duplicates (2,3)
-                        return item.datasetIndex <= 1;
+                            ],
+                        }
                     },
-                    callbacks: {
-                        title: function(items) {
-                            return items[0].label;
-                        },
-                        label: function(item) {
-                            const isAck = item.datasetIndex === 0;
-                            const raw = isAck ? ackData[item.dataIndex] : fillData[item.dataIndex];
-                            const total = isAck ? ackTotal : fillTotal;
-                            const name = isAck ? 'Submit → Ack' : 'Submit → Fill';
-                            return [
-                                name,
-                                'Count: ' + raw,
-                                'Share: ' + item.parsed.y + '%',
-                                'n=' + total,
-                            ];
+                    tooltip: {
+                        filter: item => item.datasetIndex <= 1,
+                        callbacks: {
+                            title: items => items[0].label,
+                            label: item => {
+                                const isAck = item.datasetIndex === 0;
+                                return [
+                                    isAck ? 'Submit → Ack' : 'Submit → Fill',
+                                    'Count: ' + (isAck ? ackData : fillData)[item.dataIndex],
+                                    'Share: ' + item.parsed.y + '%',
+                                    'n=' + (isAck ? ackTotal : fillTotal),
+                                ];
+                            },
                         },
                     },
-                    displayColors: true,
                 },
-            },
-            scales: {
-                x: {
-                    ticks: { color: 'rgba(255,255,255,0.45)', font: { size: 10 } },
-                    grid: { color: 'rgba(255,255,255,0.04)' },
-                },
-                y: {
-                    beginAtZero: true,
-                    ticks: {
-                        color: 'rgba(255,255,255,0.4)',
-                        font: { size: 9 },
-                        callback: function(v) { return v + '%'; },
-                    },
-                    grid: { color: 'rgba(255,255,255,0.05)' },
-                    title: { display: true, text: '% of orders', color: 'rgba(255,255,255,0.3)', font: { size: 9 } },
-                }
+                scales: { x: xAxis, y: yAxis }
             }
-        }
-    });
+        });
+    }
+
+    // ── RIGHT: Total Duration Distribution ──
+    const ctx2 = document.getElementById('totalDurChart');
+    if (ctx2) {
+        const tdLabels = {{ total_dur_labels | tojson }};
+        const tdData = {{ total_dur_hist | tojson }};
+        const tdTotal = tdData.reduce((a, b) => a + b, 0) || 1;
+        const tdPct = tdData.map(v => +(v / tdTotal * 100).toFixed(1));
+
+        new Chart(ctx2, {
+            type: 'bar',
+            data: {
+                labels: tdLabels,
+                datasets: [
+                    { data: tdPct, type: 'bar', backgroundColor: 'rgba(226,167,69,0.28)', borderColor: 'rgba(226,167,69,0.50)', borderWidth: 1, borderRadius: 3, barPercentage: 0.7, categoryPercentage: 0.8, order: 2 },
+                    { data: tdPct, type: 'line', borderColor: '#e2a745', backgroundColor: 'rgba(226,167,69,0.08)', borderWidth: 2.5, fill: true, tension: 0.4, pointRadius: 3, pointBackgroundColor: '#e2a745', pointBorderColor: '#0d1117', pointBorderWidth: 1.5, order: 1 },
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: {
+                        display: true, position: 'top', align: 'end',
+                        labels: {
+                            color: 'rgba(255,255,255,0.5)', font: { size: 9 }, boxWidth: 12, boxHeight: 8, padding: 8,
+                            generateLabels: () => [
+                                { text: 'Total Duration', fillStyle: '#e2a745', strokeStyle: '#e2a745', lineWidth: 0, fontColor: 'rgba(255,255,255,0.55)' },
+                            ],
+                        }
+                    },
+                    tooltip: {
+                        filter: item => item.datasetIndex === 0,
+                        callbacks: {
+                            title: items => items[0].label,
+                            label: item => [
+                                'Total Duration',
+                                'Count: ' + tdData[item.dataIndex],
+                                'Share: ' + item.parsed.y + '%',
+                                'n=' + tdTotal,
+                            ],
+                        },
+                    },
+                },
+                scales: { x: xAxis, y: yAxis }
+            }
+        });
+    }
 })();
 </script>
 {% endif %}
