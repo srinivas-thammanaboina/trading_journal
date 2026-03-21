@@ -157,7 +157,7 @@ def test_broker_metrics_page_renders():
     # New panels
     assert "Gateway Status" in r.text or "GATEWAY STATUS" in r.text
     assert "Order Flow" in r.text or "ORDER FLOW" in r.text
-    assert "Latency Breakdown" in r.text or "LATENCY BREAKDOWN" in r.text
+    assert "Execution Latency Summary" in r.text
     assert "Recent Errors" in r.text
     assert "Execution Quality" in r.text
     assert "Per-Ticker Breakdown" in r.text

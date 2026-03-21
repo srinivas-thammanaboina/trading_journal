@@ -20,7 +20,6 @@
 
 <!-- ══════ TOP ROW: Gateway Status | Broker Errors | Order Flow ══════ -->
 <div class="bm-top-row">
-    <!-- Gateway Status -->
     <div class="card bm-gateway-card">
         <div class="bm-card-label">GATEWAY STATUS</div>
         <div class="bm-gateway-status {% if gateway_health.connected %}bm-connected{% else %}bm-disconnected{% endif %}">
@@ -31,8 +30,6 @@
         <div class="bm-card-sub">Last: {{ gateway_health.last_sync }}</div>
         {% endif %}
     </div>
-
-    <!-- Broker Errors -->
     <div class="card bm-errors-card">
         <div class="bm-card-label">BROKER ERRORS
             <span class="badge badge-red" style="margin-left:0.5rem;">{{ errors|length }}</span>
@@ -47,334 +44,244 @@
         </div>
         {% endif %}
     </div>
-
-    <!-- Order Flow -->
     <div class="card bm-orderflow-card">
         <div class="bm-card-label">ORDER FLOW</div>
         <div class="bm-of-main">
             <span class="bm-of-big">{{ order_flow.filled or 0 }}</span>
             <span class="bm-of-text">Orders filled</span>
-            <span class="bm-of-today">Today</span>
         </div>
         <div class="bm-of-detail">
             <span>{{ order_flow.total_submitted or 0 }} <span class="bm-of-dim">Submitted</span></span>
-            <span style="margin-left:1rem;">{{ order_flow.last_fill_time[11:16] if order_flow.last_fill_time and order_flow.last_fill_time|length > 16 else '—' }} <span class="bm-of-dim">Last Filled</span></span>
+            <span style="margin-left:1rem;">{{ order_flow.last_fill_time[11:16] if order_flow.last_fill_time and order_flow.last_fill_time|length > 16 else '—' }} <span class="bm-of-dim">Last Fill</span></span>
         </div>
     </div>
 </div>
 
-<!-- ══════ MIDDLE ROW: Gateway Health + Order Flow Summary | Latency Breakdown ══════ -->
-<div class="bm-mid-row">
-    <!-- Left column: Gateway Health + Order Flow Summary stacked -->
-    <div class="bm-mid-left">
-        <!-- Gateway Health -->
-        <div class="card">
-            <div class="chart-title">Gateway Health</div>
-            <table class="bm-health-table">
-                <tbody>
-                    <tr>
-                        <td>Reconnects</td>
-                        <td>
-                            {% if gateway_health.reconnects is not none %}
-                                {{ gateway_health.reconnects }}
-                                <span class="bm-today-badge">Today</span>
-                            {% else %}
-                                <span class="bm-na">N/A</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Disconnect Duration</td>
-                        <td>
-                            {% if gateway_health.disconnect_duration is not none %}
-                                ~{{ gateway_health.disconnect_duration }}s
-                                <span style="color:var(--text-muted); font-size:0.75rem;">Avg Duration</span>
-                            {% else %}
-                                <span class="bm-na">N/A</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Last Sync</td>
-                        <td>
-                            {% if gateway_health.last_sync %}
-                                {{ gateway_health.last_sync }}
-                            {% else %}
-                                <span class="bm-na">—</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Market Data</td>
-                        <td>
-                            <span class="{% if gateway_health.market_data == 'Live' %}positive{% else %}negative{% endif %}">
-                                {{ gateway_health.market_data }}
-                            </span>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Account Access Uptime</td>
-                        <td>
-                            {% if gateway_health.uptime_pct is not none %}
-                                {{ "%.1f"|format(gateway_health.uptime_pct) }}%
-                            {% else %}
-                                <span class="bm-na">N/A</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
+<!-- ══════ EXECUTION LATENCY SUMMARY ══════ -->
+{% set avg_ack = (latency_split.avg_submit_to_ack_ms or 0)|int %}
+{% set avg_fill = (latency_split.avg_submit_to_fill_ms or 0)|int %}
+{% set max_fill = (latency_split.max_submit_to_fill_ms or 0)|int %}
+{% set n_filled = order_flow.filled or 0 %}
+{% set n_total = order_flow.total_submitted or 1 %}
+<div class="card" style="margin-bottom:1.5rem;">
+    <div style="font-weight:700; font-size:1.1rem; margin-bottom:0.15rem;">Execution Latency Summary</div>
+    <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:1.25rem;">Latency distribution for Submit &rarr; Ack and Submit &rarr; Fill</div>
 
-        <!-- Order Flow Summary -->
-        <div class="card">
-            <div class="chart-title">Order Flow Summary</div>
-            <table class="bm-health-table">
-                <tbody>
-                    <tr>
-                        <td>Orders Submitted</td>
-                        <td>
-                            <strong>{{ order_flow.total_submitted or 0 }}</strong>
-                            <span class="bm-today-badge">Today</span>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Partial Fills</td>
-                        <td>
-                            <strong>{{ order_flow.partial_fills or 0 }}</strong>
-                            <span class="bm-today-badge">Today</span>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Fills</td>
-                        <td>
-                            <strong>{{ order_flow.filled or 0 }}</strong>
-                            <span class="bm-today-badge">Today</span>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Cancels</td>
-                        <td>
-                            <strong>{{ order_flow.cancelled or 0 }}</strong>
-                            <span class="bm-today-badge">Today</span>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Escalation Rate</td>
-                        <td>
-                            <strong class="{% if (order_flow.escalation_rate or 0) > 20 %}negative{% endif %}">{{ order_flow.escalation_rate or 0 }}%</strong>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Reject Rate</td>
-                        <td>
-                            <strong class="{% if (order_flow.reject_rate or 0) > 5 %}negative{% endif %}">{{ order_flow.reject_rate or 0 }}%</strong>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+    <!-- Zone 1: KPI Strip -->
+    <div style="display:grid; grid-template-columns:repeat(5, 1fr); gap:0.75rem; margin-bottom:1.5rem;">
+        <!-- Avg Ack -->
+        <div style="background:rgba(78,205,196,0.08); border:1px solid rgba(78,205,196,0.2); border-radius:8px; padding:0.75rem; text-align:center;">
+            <div style="font-size:1.6rem; font-weight:700; color:#4ecdc4; font-family:var(--font-mono);">{{ avg_ack }}<span style="font-size:0.8rem; font-weight:400;">ms</span></div>
+            <div style="font-size:0.7rem; color:rgba(78,205,196,0.7); margin-top:0.15rem;">Avg Submit &rarr; Ack</div>
+        </div>
+        <!-- P95 Ack -->
+        <div style="background:rgba(78,205,196,0.05); border:1px solid rgba(78,205,196,0.12); border-radius:8px; padding:0.75rem; text-align:center;">
+            <div style="font-size:1.6rem; font-weight:700; color:#4ecdc4; font-family:var(--font-mono);">{{ (p95_ack or 0)|int }}<span style="font-size:0.8rem; font-weight:400;">ms</span></div>
+            <div style="font-size:0.7rem; color:rgba(78,205,196,0.7); margin-top:0.15rem;">P95 Submit &rarr; Ack</div>
+        </div>
+        <!-- Avg Fill -->
+        <div style="background:rgba(243,156,18,0.08); border:1px solid rgba(243,156,18,0.2); border-radius:8px; padding:0.75rem; text-align:center;">
+            <div style="font-size:1.6rem; font-weight:700; color:#f39c12; font-family:var(--font-mono);">{{ avg_fill }}<span style="font-size:0.8rem; font-weight:400;">ms</span></div>
+            <div style="font-size:0.7rem; color:rgba(243,156,18,0.7); margin-top:0.15rem;">Avg Submit &rarr; Fill</div>
+        </div>
+        <!-- P95 Fill -->
+        <div style="background:rgba(243,156,18,0.05); border:1px solid rgba(243,156,18,0.12); border-radius:8px; padding:0.75rem; text-align:center;">
+            <div style="font-size:1.6rem; font-weight:700; color:#f39c12; font-family:var(--font-mono);">{{ (p95_fill or 0)|int }}<span style="font-size:0.8rem; font-weight:400;">ms</span></div>
+            <div style="font-size:0.7rem; color:rgba(243,156,18,0.7); margin-top:0.15rem;">P95 Submit &rarr; Fill</div>
+        </div>
+        <!-- Orders Filled -->
+        <div style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:8px; padding:0.75rem; text-align:center;">
+            <div style="font-size:1.6rem; font-weight:700; color:var(--text-primary); font-family:var(--font-mono);">{{ n_filled }}</div>
+            <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.15rem;">Orders Filled <span style="opacity:0.6;">n={{ n_total }}</span></div>
         </div>
     </div>
 
-    <!-- Right column: Latency Breakdown -->
-    <div class="card bm-latency-card">
-        <div class="bm-card-label">LATENCY BREAKDOWN</div>
-        {% set avg_total = (latency.avg_latency_ms or 0) %}
-        <div class="bm-latency-hero">
-            <span class="bm-latency-big">{{ avg_total|int }}</span>
-            <span class="bm-latency-unit">ms</span>
-            <span class="bm-latency-pct {% if avg_total < 500 %}positive{% elif avg_total < 2000 %}{% else %}negative{% endif %}">
-                Submit ~ Fill
-            </span>
-            <span style="color:var(--text-muted); font-size:0.75rem; margin-left:0.5rem;">
-                Avg Slippage {{ "%.1f"|format((slippage.avg_slippage or 0) * 100) }}c x mid
-            </span>
+    <!-- Zone 2: Dual Bucket Distributions -->
+    {% set ack_total = (ack_buckets.under_500 + ack_buckets._500_to_1s + ack_buckets._1s_to_2s + ack_buckets._2s_plus) or 1 %}
+    {% set fill_total = (fill_buckets.under_500 + fill_buckets._500_to_1s + fill_buckets._1s_to_2s + fill_buckets._2s_to_5s + fill_buckets._5s_to_10s + fill_buckets._10s_plus) or 1 %}
+
+    <!-- Submit → Ack bar -->
+    <div style="margin-bottom:1.25rem;">
+        <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.4rem;">
+            <span style="font-size:0.8rem; font-weight:600; color:#4ecdc4;">Submit &rarr; Ack</span>
+            {% set ack_under_1s = ((ack_buckets.under_500 + ack_buckets._500_to_1s) / ack_total * 100)|round|int %}
+            <span style="font-size:0.8rem; font-weight:700; color:#4ecdc4;">{{ ack_under_1s }}% <span style="font-weight:400; font-size:0.7rem;">&lt;1s</span></span>
         </div>
-
-        <!-- Latency Breakdown Detail -->
-        <div class="bm-latency-grid">
-            <!-- Submit → Ack -->
-            <div class="bm-latency-item">
-                <div class="bm-latency-label">Submit ~ Ack</div>
-                <div class="bm-latency-val">
-                    <span class="bm-latency-num">{{ (latency_split.avg_submit_to_ack_ms or 0)|int }}</span>
-                    <span class="bm-latency-ms">ms Avg</span>
-                </div>
-                <div class="bm-latency-range">
-                    <span>Min · {{ (latency_split.min_submit_to_ack_ms or 0)|int }}ms</span>
-                    <span>{{ (latency_split.avg_submit_to_ack_ms or 0)|int }}ms Avg</span>
-                    <span>Max · {{ (latency_split.max_submit_to_ack_ms or 0)|int }}ms</span>
-                </div>
-                <div class="bm-mini-bar">
-                    {% set ack_pct = ((latency_split.avg_submit_to_ack_ms or 0) / (avg_total if avg_total > 0 else 1) * 100)|int %}
-                    <div class="bm-mini-fill" style="width:{{ ack_pct if ack_pct <= 100 else 100 }}%;"></div>
-                </div>
+        <div style="display:flex; height:28px; border-radius:6px; overflow:hidden; background:rgba(255,255,255,0.03);">
+            {% set ack_items = [
+                (ack_buckets.under_500, 'rgba(78,205,196,0.85)', '<500ms'),
+                (ack_buckets._500_to_1s, 'rgba(78,205,196,0.55)', '0.5-1s'),
+                (ack_buckets._1s_to_2s, 'rgba(78,205,196,0.35)', '1-2s'),
+                (ack_buckets._2s_plus, 'rgba(78,205,196,0.18)', '2s+'),
+            ] %}
+            {% for count, color, label in ack_items %}
+            {% set pct = (count / ack_total * 100)|round|int %}
+            {% if pct > 0 %}
+            <div style="width:{{ pct }}%; background:{{ color }}; display:flex; align-items:center; justify-content:center; font-size:0.65rem; font-weight:600; color:{% if loop.index <= 2 %}#0d1117{% else %}rgba(255,255,255,0.6){% endif %}; min-width:20px;" title="{{ label }}: {{ count }} ({{ pct }}%)">
+                {% if pct >= 8 %}{{ pct }}%{% endif %}
             </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-top:0.25rem;">
+            {% for count, color, label in ack_items %}
+            <span style="font-size:0.65rem; color:var(--text-muted);">{{ label }}</span>
+            {% endfor %}
+        </div>
+    </div>
 
-            <!-- Submit → Fill -->
-            <div class="bm-latency-item">
-                <div class="bm-latency-label">Submit ~ Fill</div>
-                <div class="bm-latency-val">
-                    <span class="bm-latency-num">{{ (latency_split.avg_submit_to_fill_ms or 0)|int }}</span>
-                    <span class="bm-latency-ms">ms Avg</span>
-                </div>
-                <div class="bm-latency-range">
-                    <span>Min · {{ (latency_split.min_submit_to_fill_ms or 0)|int }}ms</span>
-                    <span>{{ (latency_split.avg_submit_to_fill_ms or 0)|int }}ms Avg</span>
-                    <span>Max · {{ (latency_split.max_submit_to_fill_ms or 0)|int }}ms</span>
-                </div>
-                <div class="bm-mini-bar">
-                    {% set fill_pct = ((latency_split.avg_submit_to_fill_ms or 0) / (avg_total if avg_total > 0 else 1) * 100)|int %}
-                    <div class="bm-mini-fill bm-fill-orange" style="width:{{ fill_pct if fill_pct <= 100 else 100 }}%;"></div>
-                </div>
+    <!-- Submit → Fill bar -->
+    <div style="margin-bottom:1.25rem;">
+        <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.4rem;">
+            <span style="font-size:0.8rem; font-weight:600; color:#f39c12;">Submit &rarr; Fill</span>
+            {% set fill_under_2s = ((fill_buckets.under_500 + fill_buckets._500_to_1s + fill_buckets._1s_to_2s) / fill_total * 100)|round|int %}
+            <span style="font-size:0.8rem; font-weight:700; color:#f39c12;">{{ fill_under_2s }}% <span style="font-weight:400; font-size:0.7rem;">&lt;2s</span></span>
+        </div>
+        <div style="display:flex; height:28px; border-radius:6px; overflow:hidden; background:rgba(255,255,255,0.03);">
+            {% set fill_items = [
+                (fill_buckets.under_500, 'rgba(243,156,18,0.85)', '<500ms'),
+                (fill_buckets._500_to_1s, 'rgba(243,156,18,0.65)', '0.5-1s'),
+                (fill_buckets._1s_to_2s, 'rgba(243,156,18,0.48)', '1-2s'),
+                (fill_buckets._2s_to_5s, 'rgba(243,156,18,0.32)', '2-5s'),
+                (fill_buckets._5s_to_10s, 'rgba(243,156,18,0.20)', '5-10s'),
+                (fill_buckets._10s_plus, 'rgba(231,76,60,0.35)', '10s+'),
+            ] %}
+            {% for count, color, label in fill_items %}
+            {% set pct = (count / fill_total * 100)|round|int %}
+            {% if pct > 0 %}
+            <div style="width:{{ pct }}%; background:{{ color }}; display:flex; align-items:center; justify-content:center; font-size:0.65rem; font-weight:600; color:{% if loop.index <= 2 %}#0d1117{% else %}rgba(255,255,255,0.6){% endif %}; min-width:20px;" title="{{ label }}: {{ count }} ({{ pct }}%)">
+                {% if pct >= 6 %}{{ pct }}%{% endif %}
             </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-top:0.25rem;">
+            {% for count, color, label in fill_items %}
+            <span style="font-size:0.65rem; color:var(--text-muted);">{{ label }}</span>
+            {% endfor %}
+        </div>
+    </div>
 
-            <!-- Cancel Confirmation -->
-            <div class="bm-latency-item">
-                <div class="bm-latency-label">Cancel Confirmation</div>
-                <div class="bm-latency-val">
-                    <span class="bm-latency-num">{{ (latency_split.avg_cancel_confirm_ms or 0)|int }}</span>
-                    <span class="bm-latency-ms">ms Avg</span>
-                </div>
-                <div class="bm-mini-bar">
-                    {% set cancel_pct = ((latency_split.avg_cancel_confirm_ms or 0) / (avg_total if avg_total > 0 else 1) * 100)|int %}
-                    <div class="bm-mini-fill bm-fill-purple" style="width:{{ cancel_pct if cancel_pct <= 100 else 100 }}%;"></div>
-                </div>
-            </div>
+    <!-- Zone 3: Distribution Chart (bars + curves) -->
+    {% if ack_hist or fill_hist %}
+    <div style="margin-bottom:1.25rem;">
+        <div style="display:flex; justify-content:space-between; align-items:baseline;">
+            <div style="font-size:0.75rem; color:var(--text-muted);">Latency Distribution</div>
+            <div style="font-size:0.6rem; color:var(--text-muted); opacity:0.6;">Bars = actual bucket % &nbsp;|&nbsp; Curves = smoothed trend</div>
+        </div>
+        <div style="height:200px; margin-top:0.4rem;">
+            <canvas id="latencyDistChart"></canvas>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Zone 4: Operational Footer -->
+    <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:0.75rem; padding-top:1rem; border-top:1px solid var(--border);">
+        <!-- Escalation Rate -->
+        <div style="text-align:center;">
+            <div style="font-size:0.65rem; color:var(--text-muted); text-transform:uppercase; margin-bottom:0.25rem;">Escalation Rate</div>
+            <div style="font-size:1.4rem; font-weight:700; color:#f39c12; font-family:var(--font-mono);">{{ order_flow.escalation_rate or 0 }}%</div>
+            <div style="font-size:0.65rem; color:var(--text-muted);">{{ order_flow.escalated or 0 }}/{{ n_total }} escalated</div>
+        </div>
+        <!-- Fill Rate -->
+        <div style="text-align:center;">
+            <div style="font-size:0.65rem; color:var(--text-muted); text-transform:uppercase; margin-bottom:0.25rem;">Fill Rate</div>
+            <div style="font-size:1.4rem; font-weight:700; color:#2ecc71; font-family:var(--font-mono);">{{ order_flow.fill_rate or 0 }}%</div>
+            <div style="font-size:0.65rem; color:var(--text-muted);">{{ n_filled }}/{{ n_total }} filled</div>
+        </div>
+        <!-- Reject Rate -->
+        <div style="text-align:center;">
+            <div style="font-size:0.65rem; color:var(--text-muted); text-transform:uppercase; margin-bottom:0.25rem;">Reject Rate</div>
+            <div style="font-size:1.4rem; font-weight:700; color:{{ '#e74c3c' if (order_flow.reject_rate or 0) > 0 else 'var(--text-primary)' }}; font-family:var(--font-mono);">{{ order_flow.reject_rate or 0 }}%</div>
+            <div style="font-size:0.65rem; color:var(--text-muted);">{{ order_flow.failed or 0 }}/{{ n_total }} rejected</div>
+        </div>
+        <!-- Cancel Rate -->
+        <div style="text-align:center;">
+            <div style="font-size:0.65rem; color:var(--text-muted); text-transform:uppercase; margin-bottom:0.25rem;">Cancel Rate</div>
+            <div style="font-size:1.4rem; font-weight:700; color:var(--text-primary); font-family:var(--font-mono);">{{ order_flow.cancel_rate or 0 }}%</div>
+            <div style="font-size:0.65rem; color:var(--text-muted);">{{ order_flow.cancelled or 0 }}/{{ n_total }} canceled</div>
         </div>
     </div>
 </div>
 
-<!-- ══════ BOTTOM ROW: Recent Errors | Execution Quality ══════ -->
-<div class="bm-bot-row">
-    <!-- Recent Errors -->
-    <div class="card bm-errors-table-card">
-        <div class="chart-title">Recent Errors</div>
-        <div class="table-wrap" style="border:none;">
-            <table>
-                <thead>
-                    <tr>
-                        <th>TIME</th>
-                        <th>CODE</th>
-                        <th>PROBLEM</th>
-                        <th>SYMBOL</th>
-                        <th>STAGE</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for e in errors[:10] %}
-                    <tr>
-                        <td style="white-space:nowrap;">{{ e.error_time[11:19] if e.error_time and e.error_time|length > 19 else e.error_time or '—' }}</td>
-                        <td>
-                            {% if e.error_code %}
-                            <span class="badge badge-yellow">{{ e.error_code }}</span>
-                            {% else %}
-                            <span style="color:var(--text-muted);">—</span>
-                            {% endif %}
-                        </td>
-                        <td style="max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                            {{ e.error_message or e.error_type or e.order_status or '—' }}
-                        </td>
-                        <td>{{ e.contract_symbol or e.ticker or '—' }}</td>
-                        <td>
-                            {% if e.error_type == 'rejected' %}<span class="badge badge-red">Rejected</span>
-                            {% elif e.error_type == 'canceled' %}<span class="badge badge-yellow">Canceled</span>
-                            {% elif e.error_type == 'escalated' %}<span class="badge" style="background:rgba(219,109,40,0.15); color:var(--orange);">Escalated</span>
-                            {% elif e.order_status == 'failed' %}<span class="badge badge-red">Failed</span>
-                            {% else %}<span class="badge badge-muted">{{ e.error_type or e.order_status or '—' }}</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                    {% if not errors %}
-                    <tr><td colspan="5" style="text-align:center; color:var(--text-secondary); padding:1.5rem;">No errors in selected period</td></tr>
-                    {% endif %}
-                </tbody>
-            </table>
-        </div>
+<!-- ══════ GATEWAY HEALTH + EXECUTION QUALITY ══════ -->
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; margin-bottom:1.5rem;">
+    <!-- Gateway Health -->
+    <div class="card">
+        <div class="chart-title">Gateway Health</div>
+        <table class="bm-health-table">
+            <tbody>
+                <tr><td>Reconnects</td><td>{% if gateway_health.reconnects is not none %}{{ gateway_health.reconnects }} <span class="bm-today-badge">Today</span>{% else %}<span class="bm-na">N/A</span>{% endif %}</td></tr>
+                <tr><td>Disconnect Duration</td><td>{% if gateway_health.disconnect_duration is not none %}~{{ gateway_health.disconnect_duration }} <span style="color:var(--text-muted); font-size:0.75rem;">total</span>{% else %}<span class="bm-na">N/A</span>{% endif %}</td></tr>
+                <tr><td>Last Sync</td><td>{{ gateway_health.last_sync or '—' }}</td></tr>
+                <tr><td>Market Data</td><td><span class="{% if gateway_health.market_data == 'Live' %}positive{% else %}negative{% endif %}">{{ gateway_health.market_data }}</span></td></tr>
+            </tbody>
+        </table>
     </div>
 
     <!-- Execution Quality -->
-    <div class="card bm-exec-card">
+    <div class="card">
         <div class="chart-title">Execution Quality</div>
-
-        <!-- Slippage vs Mid -->
-        <div class="bm-exec-section">
-            <div class="bm-exec-label">Slippage vs Mid</div>
-            <div class="bm-exec-prices">
-                <div class="bm-price-box">
-                    <div class="bm-price-big">${{ "%.2f"|format(slippage.avg_entry_price or 0) }}</div>
-                    <div class="bm-price-label">Entry Price</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-top:0.75rem;">
+            <div>
+                <div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Avg Slippage vs Mid</div>
+                <div style="font-size:1.2rem; font-weight:700; font-family:var(--font-mono); margin-top:0.25rem;" class="{{ 'positive' if (slippage.avg_slippage or 0) <= 0.05 else 'negative' }}">
+                    ${{ "%.4f"|format(slippage.avg_slippage or 0) }}
                 </div>
-                <div class="bm-price-box">
-                    <div class="bm-price-big">${{ "%.2f"|format(slippage.avg_fill_price or 0) }}</div>
-                    <div class="bm-price-label">Avg Fill</div>
-                </div>
+                <div style="font-size:0.7rem; color:var(--text-muted);">Spread: ${{ "%.4f"|format(slippage.avg_spread or 0) }}</div>
             </div>
-            <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.3rem;">
-                Avg slippage: <span class="{{ 'positive' if (slippage.avg_slippage or 0) <= 0.05 else 'negative' }}">${{ "%.4f"|format(slippage.avg_slippage or 0) }}</span>
-                &middot; Spread: ${{ "%.4f"|format(slippage.avg_spread or 0) }}
+            <div>
+                <div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Avg Slippage vs Signal</div>
+                <div style="font-size:1.2rem; font-weight:700; font-family:var(--font-mono); margin-top:0.25rem;" class="{{ 'positive' if (slippage.avg_slippage_vs_signal or 0) <= 0.10 else 'negative' }}">
+                    ${{ "%.4f"|format(slippage.avg_slippage_vs_signal or 0) }}
+                </div>
+                <div style="font-size:0.7rem; color:var(--text-muted);">{{ slippage.total_with_quote or 0 }} orders with quotes</div>
             </div>
         </div>
-
-        <!-- Fill Rate -->
-        <div class="bm-exec-section">
-            <div class="bm-exec-label">Fill Rate</div>
-            <div class="bm-rate-row">
-                <div class="bm-rate-bar-track">
-                    <div class="bm-rate-bar-fill bm-bar-green" style="width:{{ order_flow.fill_rate or 0 }}%;"></div>
-                </div>
-                <div class="bm-rate-value">
-                    <strong>{{ order_flow.fill_rate or 0 }}%</strong>
-                    <span class="badge badge-green" style="margin-left:0.3rem;">Filled</span>
-                </div>
-            </div>
-            <div style="font-size:0.72rem; color:var(--text-muted);">
-                Today's Orders
-            </div>
-        </div>
-
-        <!-- Cancel Rate -->
-        <div class="bm-exec-section">
-            <div class="bm-exec-label">Cancel Rate</div>
-            <div class="bm-rate-row">
-                <div class="bm-rate-bar-track">
-                    <div class="bm-rate-bar-fill bm-bar-red" style="width:{{ order_flow.cancel_rate or 0 }}%;"></div>
-                </div>
-                <div class="bm-rate-value">
-                    <strong>{{ order_flow.cancel_rate or 0 }}%</strong>
-                </div>
-            </div>
-            <div style="font-size:0.72rem; color:var(--text-muted);">
-                Today's Orders
+        <!-- Fill Types -->
+        <div style="margin-top:1rem; padding-top:0.75rem; border-top:1px solid var(--border);">
+            <div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase; margin-bottom:0.5rem;">Fill Types</div>
+            <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
+                {% for ft in fill_types %}
+                <span style="font-size:0.78rem; padding:0.2rem 0.6rem; border-radius:4px; background:var(--bg-secondary);">
+                    {% if ft.fill_type == 'limit' %}<span style="color:#4ecdc4;">{{ ft.fill_type }}</span>
+                    {% elif ft.fill_type == 'market' %}<span style="color:#f39c12;">{{ ft.fill_type }}</span>
+                    {% elif ft.fill_type == 'auto_close' %}<span style="color:#e74c3c;">{{ ft.fill_type }}</span>
+                    {% else %}<span style="color:var(--text-secondary);">{{ ft.fill_type }}</span>{% endif %}
+                    <strong style="margin-left:0.3rem;">{{ ft.count }}</strong>
+                </span>
+                {% endfor %}
+                {% if not fill_types %}<span style="color:var(--text-muted); font-size:0.8rem;">No fill data</span>{% endif %}
             </div>
         </div>
+    </div>
+</div>
 
-        <!-- Fill Type Distribution -->
-        <div class="bm-exec-section" style="margin-top:0.75rem;">
-            <div class="bm-exec-label">Fill Type Distribution</div>
-            <table style="margin-top:0.3rem;">
-                <thead><tr><th>Type</th><th>Count</th></tr></thead>
-                <tbody>
-                    {% for ft in fill_types %}
-                    <tr>
-                        <td>
-                            {% if ft.fill_type == 'limit' %}<span style="color:#4ecdc4;">{{ ft.fill_type }}</span>
-                            {% elif ft.fill_type == 'market' %}<span style="color:#f39c12;">{{ ft.fill_type }}</span>
-                            {% elif ft.fill_type == 'partial' %}<span style="color:#3498db;">{{ ft.fill_type }}</span>
-                            {% elif ft.fill_type == 'auto_close' %}<span style="color:#e74c3c;">{{ ft.fill_type }}</span>
-                            {% elif ft.fill_type == 'reconciled' %}<span style="color:#9b59b6;">{{ ft.fill_type }}</span>
-                            {% else %}{{ ft.fill_type }}{% endif %}
-                        </td>
-                        <td>{{ ft.count }}</td>
-                    </tr>
-                    {% endfor %}
-                    {% if not fill_types %}
-                    <tr><td colspan="2" style="color:var(--text-secondary);">No fill data yet</td></tr>
-                    {% endif %}
-                </tbody>
-            </table>
-        </div>
+<!-- ══════ RECENT ERRORS ══════ -->
+<div class="card" style="margin-bottom:1.5rem;">
+    <div class="chart-title">Recent Errors</div>
+    <div class="table-wrap" style="border:none;">
+        <table>
+            <thead><tr><th>TIME</th><th>CODE</th><th>PROBLEM</th><th>SYMBOL</th><th>STAGE</th></tr></thead>
+            <tbody>
+                {% for e in errors[:10] %}
+                <tr>
+                    <td style="white-space:nowrap;">{{ e.error_time[11:19] if e.error_time and e.error_time|length > 19 else e.error_time or '—' }}</td>
+                    <td>{% if e.error_code %}<span class="badge badge-yellow">{{ e.error_code }}</span>{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
+                    <td style="max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ e.error_message or e.error_type or e.order_status or '—' }}</td>
+                    <td>{{ e.contract_symbol or e.ticker or '—' }}</td>
+                    <td>
+                        {% if e.error_type == 'rejected' %}<span class="badge badge-red">Rejected</span>
+                        {% elif e.error_type == 'canceled' %}<span class="badge badge-yellow">Canceled</span>
+                        {% elif e.error_type == 'escalated' %}<span class="badge" style="background:rgba(219,109,40,0.15); color:var(--orange);">Escalated</span>
+                        {% elif e.order_status == 'failed' %}<span class="badge badge-red">Failed</span>
+                        {% else %}<span class="badge badge-muted">{{ e.error_type or e.order_status or '—' }}</span>{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+                {% if not errors %}<tr><td colspan="5" style="text-align:center; color:var(--text-secondary); padding:1.5rem;">No errors in selected period</td></tr>{% endif %}
+            </tbody>
+        </table>
     </div>
 </div>
 
@@ -384,18 +291,7 @@
     <div class="chart-sub">Latency and slippage by symbol</div>
     <div class="table-wrap" style="border:none;">
         <table>
-            <thead>
-                <tr>
-                    <th>Ticker</th>
-                    <th>Orders</th>
-                    <th>Filled</th>
-                    <th>Failed</th>
-                    <th>Escalated</th>
-                    <th>Avg Latency</th>
-                    <th>Slippage (mid)</th>
-                    <th>Slippage (signal)</th>
-                </tr>
-            </thead>
+            <thead><tr><th>Ticker</th><th>Orders</th><th>Filled</th><th>Failed</th><th>Escalated</th><th>Avg Latency</th><th>Slippage (mid)</th><th>Slippage (signal)</th></tr></thead>
             <tbody>
                 {% for t in by_ticker %}
                 <tr>
@@ -405,158 +301,175 @@
                     <td class="{% if t.failed > 0 %}negative{% endif %}">{{ t.failed }}</td>
                     <td class="{% if t.escalated > 0 %}negative{% endif %}">{{ t.escalated }}</td>
                     <td>{{ "%.0f"|format(t.avg_latency_ms or 0) }}ms</td>
-                    <td class="{% if (t.avg_slippage or 0) <= 0.05 %}positive{% elif (t.avg_slippage or 0) <= 0.15 %}{% else %}negative{% endif %}">
-                        {{ "$%.4f"|format(t.avg_slippage) if t.avg_slippage is not none else '—' }}
-                    </td>
-                    <td class="{% if (t.avg_slippage_vs_signal or 0) <= 0.10 %}positive{% else %}negative{% endif %}">
-                        {{ "$%.4f"|format(t.avg_slippage_vs_signal) if t.avg_slippage_vs_signal is not none else '—' }}
-                    </td>
+                    <td class="{% if (t.avg_slippage or 0) <= 0.05 %}positive{% elif (t.avg_slippage or 0) <= 0.15 %}{% else %}negative{% endif %}">{{ "$%.4f"|format(t.avg_slippage) if t.avg_slippage is not none else '—' }}</td>
+                    <td class="{% if (t.avg_slippage_vs_signal or 0) <= 0.10 %}positive{% else %}negative{% endif %}">{{ "$%.4f"|format(t.avg_slippage_vs_signal) if t.avg_slippage_vs_signal is not none else '—' }}</td>
                 </tr>
                 {% endfor %}
-                {% if not by_ticker %}
-                <tr><td colspan="8" style="text-align:center; color:var(--text-secondary);">No order data yet</td></tr>
-                {% endif %}
+                {% if not by_ticker %}<tr><td colspan="8" style="text-align:center; color:var(--text-secondary);">No order data yet</td></tr>{% endif %}
             </tbody>
         </table>
     </div>
 </div>
 
-<!-- ══════ LATENCY DISTRIBUTION CHART ══════ -->
-<div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; margin-bottom:1.5rem;">
-    <div class="card">
-        <div class="chart-title">Latency Distribution</div>
-        <div class="chart-sub">ACK to Fill times</div>
-        <div style="position:relative; height:240px;">
-            <canvas id="latencyChart"></canvas>
-        </div>
-        <table style="margin-top:1rem;">
-            <thead><tr><th>Range</th><th>Count</th><th>%</th></tr></thead>
-            <tbody>
-                {% set total = latency.total_orders or 1 %}
-                {% for label, key in [('<2s', 'under_2s'), ('2-5s', '_2_to_5s'), ('5-10s', '_5_to_10s'), ('10-20s', '_10_to_20s'), ('20s+', 'over_20s')] %}
-                <tr>
-                    <td>{{ label }}</td>
-                    <td>{{ latency.get(key, 0) or 0 }}</td>
-                    <td>{{ "%.0f"|format((latency.get(key, 0) or 0) / total * 100) }}%</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-
-    <!-- System Notes -->
-    <div class="card">
-        <div class="chart-title">System Notes</div>
-        <div class="chart-sub">Automated analysis of execution quality</div>
-        <ul style="margin-top:1rem; line-height:1.8; list-style:none;">
-            {% for note in notes %}
-            <li style="color:var(--text-secondary); padding:0.2rem 0;">
-                <span style="color:var(--text-muted); margin-right:0.3rem;">&bull;</span> {{ note }}
-            </li>
-            {% endfor %}
-        </ul>
-
-        <!-- Latency Min/Avg/Max -->
-        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.75rem; margin-top:1.5rem;">
-            <div style="text-align:center;">
-                <div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Min</div>
-                <div class="positive" style="font-size:1.2rem; font-weight:700; font-family:var(--font-mono);">{{ "%.0f"|format(latency.min_latency_ms or 0) }}ms</div>
-            </div>
-            <div style="text-align:center;">
-                <div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Avg</div>
-                <div style="font-size:1.2rem; font-weight:700; font-family:var(--font-mono); color:var(--text-primary);">{{ "%.0f"|format(latency.avg_latency_ms or 0) }}ms</div>
-            </div>
-            <div style="text-align:center;">
-                <div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">Max</div>
-                <div class="negative" style="font-size:1.2rem; font-weight:700; font-family:var(--font-mono);">{{ "%.0f"|format(latency.max_latency_ms or 0) }}ms</div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- ══════ EXECUTION LATENCY PERCENTILES ══════ -->
+<!-- ══════ SYSTEM NOTES ══════ -->
 <div class="card" style="margin-bottom:2rem;">
-    <div class="chart-title">Execution Latency Percentiles</div>
-    <div class="chart-sub">End-to-end order execution time distribution</div>
-    <div class="table-wrap" style="border:none;">
-        <table>
-            <thead>
-                <tr>
-                    <th>Percentile</th>
-                    <th>Submit → ACK</th>
-                    <th>Submit → Fill</th>
-                    <th>Total Latency</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for p in latency_percentiles %}
-                <tr>
-                    <td><strong>P{{ p.percentile }}</strong></td>
-                    <td>{{ "%.0f"|format(p.submit_to_ack_ms or 0) }}ms</td>
-                    <td>{{ "%.0f"|format(p.submit_to_fill_ms or 0) }}ms</td>
-                    <td class="{% if (p.total_ms or 0) < 2000 %}positive{% elif (p.total_ms or 0) < 10000 %}{% else %}negative{% endif %}">
-                        {{ "%.0f"|format(p.total_ms or 0) }}ms
-                    </td>
-                </tr>
-                {% endfor %}
-                {% if not latency_percentiles %}
-                <tr><td colspan="4" style="text-align:center; color:var(--text-secondary);">No latency data yet</td></tr>
-                {% endif %}
-            </tbody>
-        </table>
-    </div>
+    <div class="chart-title">System Notes</div>
+    <div class="chart-sub">Automated analysis of execution quality</div>
+    <ul style="margin-top:0.75rem; line-height:1.8; list-style:none; padding:0;">
+        {% for note in notes %}
+        <li style="color:var(--text-secondary); padding:0.15rem 0; font-size:0.85rem;">
+            <span style="color:var(--text-muted); margin-right:0.3rem;">&bull;</span> {{ note }}
+        </li>
+        {% endfor %}
+        {% if not notes %}<li style="color:var(--text-muted); font-size:0.85rem;">No data to analyze</li>{% endif %}
+    </ul>
 </div>
 
+{% if ack_hist or fill_hist %}
 <script>
-function applyFilter() {
-    const start = document.getElementById('startDate').value;
-    const end = document.getElementById('endDate').value;
-    const ticker = document.getElementById('tickerFilter').value;
-    let url = '/broker-metrics?';
-    if (start) url += `start=${start}&`;
-    if (end) url += `end=${end}&`;
-    if (ticker) url += `ticker=${ticker}&`;
-    window.location.href = url;
-}
+(function() {
+    const ctx = document.getElementById('latencyDistChart');
+    if (!ctx) return;
 
-// Latency distribution chart
-const latencyData = {
-    labels: ['<2s', '2-5s', '5-10s', '10-20s', '20s+'],
-    datasets: [{
-        data: [
-            {{ latency.get('under_2s', 0) or 0 }},
-            {{ latency.get('_2_to_5s', 0) or 0 }},
-            {{ latency.get('_5_to_10s', 0) or 0 }},
-            {{ latency.get('_10_to_20s', 0) or 0 }},
-            {{ latency.get('over_20s', 0) or 0 }}
-        ],
-        backgroundColor: ['#4ecdc4', '#45b7d1', '#f39c12', '#e67e22', '#e74c3c'],
-        borderWidth: 0,
-        borderRadius: 4
-    }]
-};
-const ctx = document.getElementById('latencyChart');
-if (ctx) {
+    const labels = {{ hist_labels | tojson }};
+    const ackData = {{ ack_hist | tojson }};
+    const fillData = {{ fill_hist | tojson }};
+
+    const ackTotal = ackData.reduce((a, b) => a + b, 0) || 1;
+    const fillTotal = fillData.reduce((a, b) => a + b, 0) || 1;
+    const ackPct = ackData.map(v => +(v / ackTotal * 100).toFixed(1));
+    const fillPct = fillData.map(v => +(v / fillTotal * 100).toFixed(1));
+
     new Chart(ctx, {
         type: 'bar',
-        data: latencyData,
+        data: {
+            labels: labels,
+            datasets: [
+                // Bars first (rendered behind lines)
+                {
+                    label: 'Ack (bucket)',
+                    data: ackPct,
+                    type: 'bar',
+                    backgroundColor: 'rgba(78, 205, 196, 0.25)',
+                    borderColor: 'rgba(78, 205, 196, 0.45)',
+                    borderWidth: 1,
+                    borderRadius: 3,
+                    categoryPercentage: 0.7,
+                    barPercentage: 0.85,
+                    order: 2,
+                },
+                {
+                    label: 'Fill (bucket)',
+                    data: fillPct,
+                    type: 'bar',
+                    backgroundColor: 'rgba(243, 156, 18, 0.22)',
+                    borderColor: 'rgba(243, 156, 18, 0.40)',
+                    borderWidth: 1,
+                    borderRadius: 3,
+                    categoryPercentage: 0.7,
+                    barPercentage: 0.85,
+                    order: 2,
+                },
+                // Smooth curves on top
+                {
+                    label: 'Ack (trend)',
+                    data: ackPct,
+                    type: 'line',
+                    borderColor: '#4ecdc4',
+                    backgroundColor: 'rgba(78, 205, 196, 0.06)',
+                    borderWidth: 2.5,
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 4,
+                    pointBackgroundColor: '#4ecdc4',
+                    pointBorderColor: '#0d1117',
+                    pointBorderWidth: 2,
+                    order: 1,
+                },
+                {
+                    label: 'Fill (trend)',
+                    data: fillPct,
+                    type: 'line',
+                    borderColor: '#f39c12',
+                    backgroundColor: 'rgba(243, 156, 18, 0.05)',
+                    borderWidth: 2.5,
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 4,
+                    pointBackgroundColor: '#f39c12',
+                    pointBorderColor: '#0d1117',
+                    pointBorderWidth: 2,
+                    order: 1,
+                },
+            ]
+        },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'top',
+                    align: 'end',
+                    labels: {
+                        color: 'rgba(255,255,255,0.5)',
+                        font: { size: 10 },
+                        boxWidth: 14,
+                        boxHeight: 8,
+                        padding: 10,
+                        generateLabels: function(chart) {
+                            return [
+                                { text: 'Submit → Ack', fillStyle: '#4ecdc4', strokeStyle: '#4ecdc4', lineWidth: 0, fontColor: 'rgba(255,255,255,0.55)' },
+                                { text: 'Submit → Fill', fillStyle: '#f39c12', strokeStyle: '#f39c12', lineWidth: 0, fontColor: 'rgba(255,255,255,0.55)' },
+                            ];
+                        },
+                    }
+                },
+                tooltip: {
+                    filter: function(item) {
+                        // Only show tooltip for bar datasets (index 0,1), skip line duplicates (2,3)
+                        return item.datasetIndex <= 1;
+                    },
+                    callbacks: {
+                        title: function(items) {
+                            return items[0].label;
+                        },
+                        label: function(item) {
+                            const isAck = item.datasetIndex === 0;
+                            const raw = isAck ? ackData[item.dataIndex] : fillData[item.dataIndex];
+                            const total = isAck ? ackTotal : fillTotal;
+                            const name = isAck ? 'Submit → Ack' : 'Submit → Fill';
+                            return [
+                                name,
+                                'Count: ' + raw,
+                                'Share: ' + item.parsed.y + '%',
+                                'n=' + total,
+                            ];
+                        },
+                    },
+                    displayColors: true,
+                },
+            },
             scales: {
+                x: {
+                    ticks: { color: 'rgba(255,255,255,0.45)', font: { size: 10 } },
+                    grid: { color: 'rgba(255,255,255,0.04)' },
+                },
                 y: {
                     beginAtZero: true,
-                    ticks: { color: '#8b949e', stepSize: 1 },
-                    grid: { color: 'rgba(255,255,255,0.05)' }
-                },
-                x: {
-                    ticks: { color: '#8b949e' },
-                    grid: { display: false }
+                    ticks: {
+                        color: 'rgba(255,255,255,0.4)',
+                        font: { size: 9 },
+                        callback: function(v) { return v + '%'; },
+                    },
+                    grid: { color: 'rgba(255,255,255,0.05)' },
+                    title: { display: true, text: '% of orders', color: 'rgba(255,255,255,0.3)', font: { size: 9 } },
                 }
             }
         }
     });
-}
+})();
 </script>
+{% endif %}
 {% endblock %}

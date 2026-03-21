@@ -135,6 +135,35 @@
     </div>
 </div>
 
+<!-- Parser Response Time (full width) -->
+<div class="card" style="margin-bottom:1rem;">
+    <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.75rem;">
+        <div>
+            <div style="font-weight:600;">Parser Response Time</div>
+            <div style="font-size:0.75rem; color:var(--text-muted);">Per-alert latency by time of execution</div>
+        </div>
+        {% if parser_metrics %}
+        <div style="display:flex; gap:1.5rem; font-size:0.8rem;">
+            <span style="color:var(--text-secondary);">Avg <strong>{{ parser_metrics.avg }}ms</strong></span>
+            <span style="color:var(--text-secondary);">P95 <strong>{{ parser_metrics.p95 }}ms</strong></span>
+            <span style="color:var(--text-secondary);">P99 <strong>{{ parser_metrics.p99 }}ms</strong></span>
+            <span style="color:var(--text-secondary);">Max <strong style="{{ 'color:var(--negative)' if parser_metrics.max > 3000 }}">{{ parser_metrics.max }}ms</strong></span>
+            <span style="color:var(--text-muted); font-size:0.75rem;">
+                {% for engine, cnt in parser_metrics.engines.items() %}
+                <span style="display:inline-block; padding:0.1rem 0.4rem; border-radius:3px; margin-left:0.25rem;
+                    {{ 'background:rgba(46,204,113,0.15); color:#2ecc71;' if 'claude' in engine else 'background:rgba(241,196,15,0.15); color:#f1c40f;' if 'gpt' in engine else 'background:rgba(231,76,60,0.15); color:#e74c3c;' }}">{{ engine }}: {{ cnt }}</span>
+                {% endfor %}
+            </span>
+        </div>
+        {% endif %}
+    </div>
+    {% if parser_chart_data %}
+    <div id="parserChartContainer"></div>
+    {% else %}
+    <div style="color:var(--text-muted); font-size:0.85rem; padding:2rem; text-align:center;">No parser latency data yet</div>
+    {% endif %}
+</div>
+
 <!-- System Notes -->
 <div style="margin-bottom:1.5rem;">
     <div class="card">
@@ -268,5 +297,150 @@ function aPgBtn(page, label) {
 }
 
 loadAlertAudit(1);
+
+// Parser latency chart — per-day sections with true time axis
+{% if parser_chart_data %}
+(function() {
+    const allData = {{ parser_chart_data | tojson }};
+    const container = document.getElementById('parserChartContainer');
+    if (!container || !allData.length) return;
+
+    const engineColors = {
+        'claude-haiku': '#2ecc71',
+        'claude-haiku-retry': '#f39c12',
+        'gpt-4.1-mini': '#f1c40f',
+        'failed': '#e74c3c',
+        'unknown': '#95a5a6',
+    };
+    const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const avgMs = {{ parser_metrics.avg if parser_metrics else 0 }};
+
+    // Group by day
+    const byDay = {};
+    allData.forEach(d => {
+        if (!byDay[d.day]) byDay[d.day] = [];
+        byDay[d.day].push(d);
+    });
+    const sortedDays = Object.keys(byDay).sort();
+    const numDays = sortedDays.length;
+    const globalMax = Math.max(...allData.map(d => d.ms)) * 1.15;
+
+    // Market hours: 9:30 - 16:00 ET
+    const MKT_OPEN_H = 9, MKT_OPEN_M = 30;
+    const MKT_CLOSE_H = 16, MKT_CLOSE_M = 0;
+
+    // Build grid columns — give Y-axis label space to first column
+    const colTemplate = sortedDays.map((_, i) => i === 0 ? 'minmax(0, 1.08fr)' : 'minmax(0, 1fr)').join(' ');
+
+    // Day headers
+    const headerRow = document.createElement('div');
+    headerRow.style.cssText = 'display:grid; grid-template-columns:' + colTemplate + '; gap:0;';
+    sortedDays.forEach((day, i) => {
+        const dt = new Date(day + 'T12:00:00');
+        const label = dayNames[dt.getDay()] + ' ' + day.substring(5).replace('-', '/');
+        const hdr = document.createElement('div');
+        hdr.style.cssText = 'text-align:center; font-weight:600; font-size:0.8rem; padding:0.5rem 0; background:var(--bg-secondary); color:var(--text-primary);'
+            + (i > 0 ? 'border-left:1px solid var(--border);' : '')
+            + (i === 0 ? 'border-radius:6px 0 0 0;' : '')
+            + (i === numDays - 1 ? 'border-radius:0 6px 0 0;' : '');
+        hdr.textContent = label;
+        headerRow.appendChild(hdr);
+    });
+    container.appendChild(headerRow);
+
+    // Charts row
+    const chartRow = document.createElement('div');
+    chartRow.style.cssText = 'display:grid; grid-template-columns:' + colTemplate + '; gap:0;';
+
+    sortedDays.forEach((day, i) => {
+        const dayData = byDay[day];
+        const cell = document.createElement('div');
+        cell.style.cssText = 'height:320px; padding:0.25rem 0.15rem;'
+            + (i > 0 ? 'border-left:1px solid var(--border);' : '');
+
+        const canvas = document.createElement('canvas');
+        cell.appendChild(canvas);
+        chartRow.appendChild(cell);
+
+        // Convert HH:MM to Date objects on this day for time axis
+        const timeMin = new Date(day + 'T' + String(MKT_OPEN_H).padStart(2,'0') + ':' + String(MKT_OPEN_M).padStart(2,'0') + ':00');
+        const timeMax = new Date(day + 'T' + String(MKT_CLOSE_H).padStart(2,'0') + ':' + String(MKT_CLOSE_M).padStart(2,'0') + ':00');
+
+        const dataPoints = dayData.map(d => ({
+            x: new Date(day + 'T' + d.hhmm + ':00'),
+            y: d.ms,
+        }));
+        const colors = dayData.map(d => engineColors[d.engine] || '#95a5a6');
+
+        // Bar width: ~3 min in ms (so bars don't overlap or get too thin)
+        const barWidth = 3 * 60 * 1000;
+
+        new Chart(canvas, {
+            type: 'bar',
+            data: {
+                datasets: [{
+                    data: dataPoints,
+                    backgroundColor: colors,
+                    borderColor: colors,
+                    borderWidth: 1,
+                    borderRadius: 2,
+                    barThickness: numDays > 3 ? 6 : (numDays > 1 ? 8 : 12),
+                    maxBarThickness: numDays > 3 ? 8 : 14,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            title: function(items) {
+                                const d = dayData[items[0].dataIndex];
+                                return day + ' ' + d.hhmm + ' ET';
+                            },
+                            label: function(ctx) {
+                                const d = dayData[ctx.dataIndex];
+                                return d.ms + 'ms (' + d.engine + ')';
+                            }
+                        }
+                    },
+                },
+                scales: {
+                    x: {
+                        type: 'time',
+                        min: timeMin,
+                        max: timeMax,
+                        time: {
+                            unit: numDays <= 2 ? 'minute' : 'hour',
+                            stepSize: numDays <= 2 ? 30 : 1,
+                            displayFormats: {
+                                minute: 'HH:mm',
+                                hour: 'HH:mm',
+                            },
+                        },
+                        ticks: {
+                            color: 'rgba(255,255,255,0.45)',
+                            font: { size: 9 },
+                            maxRotation: 0,
+                            source: 'auto',
+                        },
+                        grid: { color: 'rgba(255,255,255,0.04)' },
+                    },
+                    y: {
+                        display: i === 0,
+                        max: globalMax,
+                        beginAtZero: true,
+                        ticks: { color: 'rgba(255,255,255,0.4)', font: { size: 9 } },
+                        grid: { color: 'rgba(255,255,255,0.05)', drawTicks: i === 0 },
+                        title: i === 0 ? { display: true, text: 'ms', color: 'rgba(255,255,255,0.35)', font: { size: 9 } } : {},
+                    }
+                }
+            }
+        });
+    });
+    container.appendChild(chartRow);
+})();
+{% endif %}
 </script>
 {% endblock %}

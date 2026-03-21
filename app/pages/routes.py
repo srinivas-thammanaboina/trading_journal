@@ -419,6 +419,45 @@ async def alerts_page(request: Request):
     # Reject reasons
     reject_reasons = {r["risk_reason"]: r["cnt"] for r in reason_rows if r["risk_reason"]}
 
+    # Parser latency metrics (columns added in schema v6 — graceful fallback)
+    parser_metrics = {}
+    parser_chart_data = []  # [{time, ms, engine}, ...] for bar chart
+    try:
+        latency_rows = conn.execute(
+            f"""SELECT alert_time, parse_latency_ms, parser_engine FROM alerts
+               WHERE 1=1{date_clause} AND parse_latency_ms IS NOT NULL
+               ORDER BY alert_time""",
+            date_params,
+        ).fetchall()
+
+        if latency_rows:
+            latencies = sorted([r["parse_latency_ms"] for r in latency_rows])
+            n = len(latencies)
+            parser_metrics = {
+                "count": n,
+                "avg": round(sum(latencies) / n),
+                "max": max(latencies),
+                "p95": latencies[min(int(n * 0.95), n - 1)],
+                "p99": latencies[min(int(n * 0.99), n - 1)],
+            }
+            engine_counts = {}
+            for r in latency_rows:
+                eng = r["parser_engine"] or "unknown"
+                engine_counts[eng] = engine_counts.get(eng, 0) + 1
+                # Chart data point
+                t = r["alert_time"] or ""
+                day = t[:10]  # YYYY-MM-DD
+                hhmm = t[11:16] if len(t) >= 16 else ""  # HH:MM
+                parser_chart_data.append({
+                    "day": day,
+                    "hhmm": hhmm,
+                    "ms": r["parse_latency_ms"],
+                    "engine": eng,
+                })
+            parser_metrics["engines"] = engine_counts
+    except Exception:
+        pass  # columns don't exist yet (pre-v6 schema)
+
     # System notes (auto-generated from data)
     notes = []
     if total > 0:
@@ -457,6 +496,8 @@ async def alerts_page(request: Request):
         "risk_outcome": risk_outcome,
         "broker_outcome": broker_outcome,
         "reject_reasons": reject_reasons,
+        "parser_metrics": parser_metrics,
+        "parser_chart_data": parser_chart_data,
         "notes": notes,
         "filter_start": filter_start,
         "filter_end": filter_end,
@@ -979,4 +1020,11 @@ async def broker_metrics_page(request: Request, start: str = "", end: str = "", 
         "order_events": data.get("order_events", []),
         "fill_types": data.get("fill_types", []),
         "notes": data.get("notes", []),
+        "ack_buckets": data.get("ack_buckets", {"under_500": 0, "_500_to_1s": 0, "_1s_to_2s": 0, "_2s_plus": 0}),
+        "fill_buckets": data.get("fill_buckets", {"under_500": 0, "_500_to_1s": 0, "_1s_to_2s": 0, "_2s_to_5s": 0, "_5s_to_10s": 0, "_10s_plus": 0}),
+        "p95_ack": data.get("p95_ack", 0),
+        "p95_fill": data.get("p95_fill", 0),
+        "ack_hist": data.get("ack_hist", []),
+        "fill_hist": data.get("fill_hist", []),
+        "hist_labels": data.get("hist_labels", []),
     })

@@ -411,6 +411,70 @@ async def get_broker_metrics(request: Request, start: str = "", end: str = "", t
     except Exception:
         latency_percentiles = []
 
+    # --- Ack/Fill bucket distributions for Execution Latency Summary card ---
+    ack_buckets = {"under_500": 0, "_500_to_1s": 0, "_1s_to_2s": 0, "_2s_plus": 0}
+    fill_buckets = {"under_500": 0, "_500_to_1s": 0, "_1s_to_2s": 0, "_2s_to_5s": 0, "_5s_to_10s": 0, "_10s_plus": 0}
+    p95_ack = 0
+    p95_fill = 0
+    try:
+        ack_fill_sql = f"""
+            SELECT
+                CASE WHEN ack_received_at IS NOT NULL AND submit_started_at IS NOT NULL
+                     THEN ROUND((julianday(ack_received_at) - julianday(submit_started_at)) * 86400000, 0)
+                     ELSE NULL END as ack_ms,
+                CASE WHEN first_fill_at IS NOT NULL AND submit_started_at IS NOT NULL
+                     THEN ROUND((julianday(first_fill_at) - julianday(submit_started_at)) * 86400000, 0)
+                     ELSE NULL END as fill_ms
+            FROM orders o {where}
+        """
+        af_rows = conn.execute(ack_fill_sql, params).fetchall()
+        ack_vals = sorted([r["ack_ms"] for r in af_rows if r["ack_ms"] is not None])
+        fill_vals = sorted([r["fill_ms"] for r in af_rows if r["fill_ms"] is not None])
+
+        # Ack buckets
+        for v in ack_vals:
+            if v < 500: ack_buckets["under_500"] += 1
+            elif v < 1000: ack_buckets["_500_to_1s"] += 1
+            elif v < 2000: ack_buckets["_1s_to_2s"] += 1
+            else: ack_buckets["_2s_plus"] += 1
+
+        # Fill buckets
+        for v in fill_vals:
+            if v < 500: fill_buckets["under_500"] += 1
+            elif v < 1000: fill_buckets["_500_to_1s"] += 1
+            elif v < 2000: fill_buckets["_1s_to_2s"] += 1
+            elif v < 5000: fill_buckets["_2s_to_5s"] += 1
+            elif v < 10000: fill_buckets["_5s_to_10s"] += 1
+            else: fill_buckets["_10s_plus"] += 1
+
+        # P95
+        if ack_vals:
+            p95_ack = ack_vals[min(int(len(ack_vals) * 0.95), len(ack_vals) - 1)]
+        if fill_vals:
+            p95_fill = fill_vals[min(int(len(fill_vals) * 0.95), len(fill_vals) - 1)]
+
+        # Build histogram bins for distribution curve (shared bins for both)
+        bin_edges = [0, 500, 1000, 2000, 5000, 10000, 20000, 60000]
+        bin_labels = ["<0.5s", "0.5-1s", "1-2s", "2-5s", "5-10s", "10-20s", "20s+"]
+
+        def _bin_counts(vals):
+            counts = [0] * (len(bin_edges) - 1)
+            for v in vals:
+                for j in range(len(bin_edges) - 1):
+                    if v < bin_edges[j + 1]:
+                        counts[j] += 1
+                        break
+                else:
+                    counts[-1] += 1
+            return counts
+
+        ack_hist = _bin_counts(ack_vals) if ack_vals else []
+        fill_hist = _bin_counts(fill_vals) if fill_vals else []
+    except Exception:
+        ack_hist = []
+        fill_hist = []
+        pass
+
     # --- System notes ---
     notes = []
     total_orders = latency.get("total_orders", 0)
@@ -464,4 +528,11 @@ async def get_broker_metrics(request: Request, start: str = "", end: str = "", t
         "fill_types": fill_types,
         "notes": notes,
         "latency_percentiles": latency_percentiles,
+        "ack_buckets": ack_buckets,
+        "fill_buckets": fill_buckets,
+        "p95_ack": p95_ack,
+        "p95_fill": p95_fill,
+        "ack_hist": ack_hist,
+        "fill_hist": fill_hist,
+        "hist_labels": ["<0.5s", "0.5-1s", "1-2s", "2-5s", "5-10s", "10-20s", "20s+"],
     }
