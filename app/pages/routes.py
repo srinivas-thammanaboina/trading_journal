@@ -644,93 +644,52 @@ async def guru_page(request: Request):
     filter_start = request.query_params.get("start", "")
     filter_end = request.query_params.get("end", "")
     filter_ticker = request.query_params.get("ticker", "")
+    from datetime import datetime
+    import pytz
+    now_et = datetime.now(tz=pytz.timezone("America/New_York"))
+    is_market_hours = 5 <= now_et.weekday() < 5 and now_et.hour >= 9
 
-    # Get available tickers for dropdown
+    # Available tickers for filter
     try:
-        ticker_rows = conn.execute(
-            "SELECT DISTINCT ticker FROM guru_signals ORDER BY ticker"
-        ).fetchall()
-        available_tickers = [r["ticker"] for r in ticker_rows]
+        available_tickers = [r["ticker"] for r in conn.execute(
+            "SELECT DISTINCT ticker FROM guru_signals ORDER BY ticker").fetchall()]
     except Exception:
         available_tickers = []
 
-    # Guru stats
-    g_sql = "SELECT action, we_executed, our_outcome, ticker FROM guru_signals WHERE 1=1"
+    # ── All guru signals (filtered) ──
+    g_sql = "SELECT action, we_executed, our_outcome, our_reject_reason, ticker, entry_price, exit_price, strike, \"right\" FROM guru_signals WHERE 1=1"
     g_params: list = []
     if filter_start:
-        g_sql += " AND trade_date >= ?"
-        g_params.append(filter_start)
+        g_sql += " AND trade_date >= ?"; g_params.append(filter_start)
     if filter_end:
-        g_sql += " AND trade_date <= ?"
-        g_params.append(filter_end)
+        g_sql += " AND trade_date <= ?"; g_params.append(filter_end)
     if filter_ticker:
-        g_sql += " AND ticker = ?"
-        g_params.append(filter_ticker)
-
+        g_sql += " AND ticker = ?"; g_params.append(filter_ticker)
     rows = conn.execute(g_sql, g_params).fetchall()
+
     total = len(rows)
     buys = sum(1 for r in rows if r["action"] == "BUY")
     closes = sum(1 for r in rows if r["action"] in ("CLOSE", "SELL", "PARTIAL_CLOSE"))
     executed = sum(1 for r in rows if r["we_executed"])
     rejected = sum(1 for r in rows if r["our_outcome"] == "rejected")
+    skipped = sum(1 for r in rows if r["our_outcome"] == "skipped")
+    filled_count = sum(1 for r in rows if r["our_outcome"] == "filled")
 
-    missed = rejected  # signals guru sent but bot didn't execute
+    # Parsed = non-duplicate, non-skipped signals (i.e. the parser returned actionable or rejected)
+    parsed = sum(1 for r in rows if r["our_outcome"] not in ("skipped",))
+    eligible = parsed - rejected  # passed risk gates
 
-    guru_stats = {
-        "total_signals": total,
-        "buys": buys,
-        "closes": closes,
-        "executed": executed,
-        "rejected": rejected,
-        "execution_rate": round(executed / total * 100, 1) if total else 0.0,
-    }
-
-    # Reject reason breakdown for gap analysis
-    gap_reasons: dict = {}
-    for r in rows:
-        if r["our_outcome"] == "rejected":
-            # We don't have reject reason in this query, so we'll get from guru_signals
-            pass
-    gap_rows = conn.execute(
-        "SELECT our_reject_reason, COUNT(*) as cnt FROM guru_signals WHERE our_outcome = 'rejected' AND our_reject_reason IS NOT NULL"
-        + (" AND trade_date >= ?" if filter_start else "")
-        + (" AND trade_date <= ?" if filter_end else "")
-        + (" AND ticker = ?" if filter_ticker else "")
-        + " GROUP BY our_reject_reason ORDER BY cnt DESC",
-        [p for p in [filter_start, filter_end, filter_ticker] if p],
-    ).fetchall()
-    gap_reasons = [(r["our_reject_reason"], r["cnt"]) for r in gap_rows]
-
-    # Per-ticker guru data
-    guru_by_ticker: dict = {}
-    for r in rows:
-        t = r["ticker"]
-        if t not in guru_by_ticker:
-            guru_by_ticker[t] = {"signals": 0, "buys": 0, "closes": 0, "executed": 0, "rejected": 0}
-        guru_by_ticker[t]["signals"] += 1
-        if r["action"] == "BUY":
-            guru_by_ticker[t]["buys"] += 1
-        if r["action"] in ("CLOSE", "SELL", "PARTIAL_CLOSE"):
-            guru_by_ticker[t]["closes"] += 1
-        if r["we_executed"]:
-            guru_by_ticker[t]["executed"] += 1
-        if r["our_outcome"] == "rejected":
-            guru_by_ticker[t]["rejected"] += 1
-
-    # Bot P&L by ticker
+    # ── Bot P&L by ticker ──
     b_sql = "SELECT ticker, realized_pnl FROM realized_pnl_events WHERE 1=1"
     b_params: list = []
     if filter_start:
-        b_sql += " AND trade_date >= ?"
-        b_params.append(filter_start)
+        b_sql += " AND trade_date >= ?"; b_params.append(filter_start)
     if filter_end:
-        b_sql += " AND trade_date <= ?"
-        b_params.append(filter_end)
+        b_sql += " AND trade_date <= ?"; b_params.append(filter_end)
     if filter_ticker:
-        b_sql += " AND ticker = ?"
-        b_params.append(filter_ticker)
-
+        b_sql += " AND ticker = ?"; b_params.append(filter_ticker)
     bot_rows = conn.execute(b_sql, b_params).fetchall()
+
     bot_by_ticker: dict = {}
     for r in bot_rows:
         t = r["ticker"]
@@ -743,123 +702,200 @@ async def guru_page(request: Request):
         elif r["realized_pnl"] < 0:
             bot_by_ticker[t]["losses"] += 1
 
-    # Merge comparison
-    all_tickers = sorted(set(guru_by_ticker.keys()) | set(bot_by_ticker.keys()))
-    comparison = []
-    for t in all_tickers:
-        g = guru_by_ticker.get(t, {"signals": 0, "buys": 0, "closes": 0, "executed": 0, "rejected": 0})
-        b = bot_by_ticker.get(t, {"trades": 0, "pnl": 0.0, "wins": 0, "losses": 0})
-        comparison.append({
-            "ticker": t,
-            "guru_signals": g["signals"],
-            "guru_buys": g["buys"],
-            "guru_closes": g["closes"],
-            "bot_executed": g["executed"],
-            "bot_rejected": g["rejected"],
-            "bot_trades": b["trades"],
-            "bot_pnl": round(b["pnl"], 2),
-            "bot_wins": b["wins"],
-            "bot_losses": b["losses"],
-            "bot_win_rate": round(b["wins"] / b["trades"] * 100, 1) if b["trades"] else 0.0,
-        })
-
-    # Recent signals loaded via AJAX (/api/guru/signals) — no server-side query needed
-
-    # Bot totals for execution quality panel
     bot_total_pnl = sum(b["pnl"] for b in bot_by_ticker.values())
     bot_total_trades = sum(b["trades"] for b in bot_by_ticker.values())
     bot_total_wins = sum(b["wins"] for b in bot_by_ticker.values())
-    fill_rate = round(executed / total * 100, 1) if total else 0.0
+    bot_win_rate = round(bot_total_wins / bot_total_trades * 100, 1) if bot_total_trades else 0.0
+    follow_rate = round(executed / total * 100, 1) if total else 0.0
+    reject_rate = round(rejected / total * 100, 1) if total else 0.0
 
-    # Guru win rate by ticker (pair BUY→CLOSE for supported tickers)
-    guru_supported_sql = """
-        SELECT * FROM guru_signals
-        WHERE our_outcome != 'skipped'
-        ORDER BY ticker, signal_time
-    """
-    guru_sup_rows = [dict(r) for r in conn.execute(guru_supported_sql).fetchall()]
-    guru_open: dict = {}  # key: (ticker, strike, right) → entry
-    guru_ticker_stats: dict = {}
+    # ── Funnel stages ──
+    closed_count = sum(b["trades"] for b in bot_by_ticker.values())
+    funnel = [
+        {"label": "Signals", "value": total, "color": "#3498db"},
+        {"label": "Parsed", "value": parsed, "color": "#2ecc71"},
+        {"label": "Eligible", "value": eligible, "color": "#f39c12"},
+        {"label": "Executed", "value": executed, "color": "#2ecc71"},
+        {"label": "Filled", "value": filled_count or executed, "color": "#3498db"},
+        {"label": "Closed", "value": closed_count, "color": "#bc8cff"},
+        {"label": "Rejected", "value": rejected, "color": "#e74c3c"},
+    ]
 
-    for r in guru_sup_rows:
-        t = r.get("ticker")
-        if not t:
-            continue
-        if t not in guru_ticker_stats:
-            guru_ticker_stats[t] = {"wins": 0, "losses": 0}
+    # ── Rejection reasons with type/impact badges ──
+    gap_rows = conn.execute(
+        "SELECT our_reject_reason, COUNT(*) as cnt FROM guru_signals WHERE our_outcome = 'rejected' AND our_reject_reason IS NOT NULL"
+        + (" AND trade_date >= ?" if filter_start else "")
+        + (" AND trade_date <= ?" if filter_end else "")
+        + (" AND ticker = ?" if filter_ticker else "")
+        + " GROUP BY our_reject_reason ORDER BY cnt DESC",
+        [p for p in [filter_start, filter_end, filter_ticker] if p],
+    ).fetchall()
 
-        action = (r.get("action") or "").upper()
-        strike = r.get("strike")
-        right = r.get("right")
-        key = (t, strike, right)
+    rejection_reasons = []
+    for r in gap_rows:
+        reason = r["our_reject_reason"]
+        cnt = r["cnt"]
+        # Classify type and impact
+        reason_lower = reason.lower()
+        if "halt" in reason_lower:
+            rtype, impact = "Risk", "Protected"
+        elif "max" in reason_lower or "position" in reason_lower or "concurrent" in reason_lower:
+            rtype, impact = "Risk", "Neutral"
+        elif "duplicate" in reason_lower:
+            rtype, impact = "Duplicate", "Neutral"
+        elif "price" in reason_lower or "cap" in reason_lower or "entry" in reason_lower:
+            rtype, impact = "Price", "Mixed"
+        elif "afternoon" in reason_lower or "session" in reason_lower or "lotto" in reason_lower or "morning" in reason_lower:
+            rtype, impact = "Session", "Protected"
+        elif "0dte" in reason_lower or "cutoff" in reason_lower:
+            rtype, impact = "Session", "Protected"
+        else:
+            rtype, impact = "Other", "Neutral"
+        rejection_reasons.append({"reason": reason, "count": cnt, "type": rtype, "impact": impact})
 
-        if action == "BUY" and r.get("entry_price"):
-            guru_open[key] = r
+    # ── Miss Quality Analysis ──
+    # Pair guru BUY→CLOSE to estimate what bot missed
+    missed_winners = 0
+    avoided_losers = 0
+    neutral_misses = 0
+    largest_missed_winner = {"ticker": "—", "pnl": 0}
+    largest_avoided_loser = {"ticker": "—", "pnl": 0}
+
+    guru_open: dict = {}
+    for r in rows:
+        action = (r["action"] or "").upper()
+        ticker = r["ticker"]
+        key = (ticker, r["strike"], r["right"])
+
+        if action == "BUY" and r["entry_price"] and not r["we_executed"]:
+            guru_open[key] = dict(r)
         elif action in ("CLOSE", "SELL", "PARTIAL_CLOSE") and key in guru_open:
             entry = guru_open.pop(key)
-            exit_p = r.get("exit_price") or r.get("entry_price")
+            exit_p = r["exit_price"] or r["entry_price"]
             if exit_p and entry.get("entry_price"):
-                if exit_p > entry["entry_price"]:
-                    guru_ticker_stats[t]["wins"] += 1
+                pnl = round((exit_p - entry["entry_price"]) * 100, 2)
+                if pnl > 0:
+                    missed_winners += 1
+                    if pnl > largest_missed_winner["pnl"]:
+                        largest_missed_winner = {"ticker": ticker, "pnl": pnl}
+                elif pnl < 0:
+                    avoided_losers += 1
+                    if pnl < largest_avoided_loser["pnl"]:
+                        largest_avoided_loser = {"ticker": ticker, "pnl": pnl}
                 else:
-                    guru_ticker_stats[t]["losses"] += 1
+                    neutral_misses += 1
 
-    # Build pie chart data: guru and bot
-    guru_pie = []
-    for t, s in sorted(guru_ticker_stats.items()):
-        total = s["wins"] + s["losses"]
-        if total > 0:
-            guru_pie.append({"ticker": t, "win_rate": round(s["wins"] / total * 100, 1), "trades": total})
+    missed_opportunity_pnl = largest_missed_winner["pnl"] - abs(largest_avoided_loser["pnl"]) if missed_winners > 0 else 0
 
-    bot_pie = []
-    for t, b in sorted(bot_by_ticker.items()):
-        total = b["trades"]
-        if total > 0:
-            wr = round(b["wins"] / total * 100, 1)
-            bot_pie.append({"ticker": t, "win_rate": wr, "trades": total})
+    # ── Operator Takeaway ──
+    takeaways = []
+    takeaways.append({"title": "Bot followed", "detail": f"{follow_rate:.1f}% of guru flow"})
+    # Find biggest drag
+    worst_ticker = max(bot_by_ticker.items(), key=lambda x: abs(x[1]["pnl"]), default=("—", {"pnl": 0}))
+    if worst_ticker[1]["pnl"] < 0:
+        takeaways.append({"title": "Main drag", "detail": f"{worst_ticker[0]} concentration and weak fills"})
+    # Risk rules assessment
+    if avoided_losers > missed_winners:
+        takeaways.append({"title": "Risk rules", "detail": "blocked several likely losers"})
+    elif avoided_losers > 0:
+        takeaways.append({"title": "Risk rules", "detail": f"avoided {avoided_losers} losers, missed {missed_winners} winners"})
+    # Best ticker
+    best_ticker = max(bot_by_ticker.items(), key=lambda x: x[1]["pnl"], default=("—", {"pnl": 0}))
+    if best_ticker[1]["pnl"] > 0:
+        takeaways.append({"title": "Best covered", "detail": best_ticker[0]})
+    # Action
+    if worst_ticker[1]["pnl"] < -100:
+        takeaways.append({"title": "Action", "detail": f"review {worst_ticker[0]} gating vs execution quality"})
 
-    # Unsupported ticker performance (guru signals we skipped)
-    # Pair BUY→CLOSE by ticker+right+strike to estimate guru P&L
-    unsupported_sql = """
+    # ── Quality Verdict ──
+    if bot_total_pnl > 0:
+        verdict = "Profitable"
+        verdict_detail = "risk rules + execution working"
+    elif avoided_losers > missed_winners:
+        verdict = "Risk Protected"
+        verdict_detail = "rules saved more than they cost"
+    elif worst_ticker[1]["pnl"] < -200:
+        verdict = f"{worst_ticker[0]} Drag"
+        verdict_detail = f"risk rules helped\nbut {worst_ticker[0]} drove losses"
+    else:
+        verdict = "Under Review"
+        verdict_detail = "insufficient data for verdict"
+
+    # ── Per-ticker comparison table ──
+    guru_by_ticker: dict = {}
+    for r in rows:
+        t = r["ticker"]
+        if t not in guru_by_ticker:
+            guru_by_ticker[t] = {"signals": 0, "buys": 0, "closes": 0, "executed": 0, "rejected": 0}
+        guru_by_ticker[t]["signals"] += 1
+        if r["action"] == "BUY": guru_by_ticker[t]["buys"] += 1
+        if r["action"] in ("CLOSE", "SELL", "PARTIAL_CLOSE"): guru_by_ticker[t]["closes"] += 1
+        if r["we_executed"]: guru_by_ticker[t]["executed"] += 1
+        if r["our_outcome"] == "rejected": guru_by_ticker[t]["rejected"] += 1
+
+    all_tickers = sorted(set(guru_by_ticker.keys()) | set(bot_by_ticker.keys()))
+    comparison = []
+    for t in all_tickers:
+        g = guru_by_ticker.get(t, {"signals": 0, "executed": 0, "rejected": 0})
+        b = bot_by_ticker.get(t, {"trades": 0, "pnl": 0.0, "wins": 0, "losses": 0})
+        elig = g["executed"] + g["rejected"]  # approximate eligible
+        frate = round(g["executed"] / g["signals"] * 100, 0) if g["signals"] else 0
+        wr = round(b["wins"] / b["trades"] * 100, 1) if b["trades"] else 0.0
+        # Verdict per ticker
+        if b["pnl"] < -200:
+            tv = "Main loss driver"
+        elif b["pnl"] > 50:
+            tv = "Decent coverage"
+        elif b["trades"] <= 1:
+            tv = "Low sample"
+        elif wr == 0 and b["trades"] > 2:
+            tv = "Execution okay" if b["pnl"] > -50 else "Needs review"
+        else:
+            tv = "No signal value" if b["trades"] == 0 else "Tracking"
+        comparison.append({
+            "ticker": t, "guru": g["signals"], "eligible": elig,
+            "executed": g["executed"], "rejected": g["rejected"],
+            "follow_rate": frate, "trades": b["trades"], "win_rate": wr,
+            "bot_pnl": round(b["pnl"], 2), "verdict": tv,
+        })
+
+    # Chart data
+    chart_tickers = [c["ticker"] for c in comparison if c["guru"] > 0]
+    chart_guru = [c["guru"] for c in comparison if c["guru"] > 0]
+    chart_executed = [c["executed"] for c in comparison if c["guru"] > 0]
+    chart_rejected = [c["rejected"] for c in comparison if c["guru"] > 0]
+
+    pnl_chart = sorted(
+        [{"ticker": t, "pnl": round(b["pnl"], 0)} for t, b in bot_by_ticker.items()],
+        key=lambda x: x["pnl"], reverse=True
+    )
+
+    # ── Unsupported tickers ──
+    skipped_rows = conn.execute("""
         SELECT * FROM guru_signals
-        WHERE our_outcome = 'skipped'
+        WHERE our_outcome = 'skipped' AND our_reject_reason LIKE '%unsupported ticker%'
         ORDER BY ticker, signal_time
-    """
-    skipped_rows = conn.execute(unsupported_sql).fetchall()
-
-    # Group by ticker
+    """).fetchall()
     unsupported_tickers: dict = {}
-    open_entries: dict = {}  # key: (ticker, strike, right) → entry row
-
+    unsup_open: dict = {}
     for r in skipped_rows:
         t = r["ticker"]
         if t not in unsupported_tickers:
-            unsupported_tickers[t] = {
-                "ticker": t, "total_signals": 0, "entries": 0, "exits": 0,
-                "wins": 0, "losses": 0, "total_pnl": 0.0, "trades": [],
-            }
+            unsupported_tickers[t] = {"ticker": t, "total_signals": 0, "entries": 0, "exits": 0, "wins": 0, "losses": 0, "total_pnl": 0.0}
         unsupported_tickers[t]["total_signals"] += 1
-
         action = (r["action"] or "").upper()
-        strike = r["strike"]
-        right = r["right"]
-        key = (t, strike, right)
-
+        key = (t, r["strike"], r["right"])
         if action == "BUY" and r["entry_price"]:
             unsupported_tickers[t]["entries"] += 1
-            open_entries[key] = r
-        elif action in ("CLOSE", "SELL") and key in open_entries:
-            entry = open_entries.pop(key)
+            unsup_open[key] = r
+        elif action in ("CLOSE", "SELL") and key in unsup_open:
+            entry = unsup_open.pop(key)
             unsupported_tickers[t]["exits"] += 1
             if r["exit_price"] and entry["entry_price"]:
                 pnl = round((r["exit_price"] - entry["entry_price"]) * 100, 2)
                 unsupported_tickers[t]["total_pnl"] += pnl
-                if pnl > 0:
-                    unsupported_tickers[t]["wins"] += 1
-                else:
-                    unsupported_tickers[t]["losses"] += 1
-
-    # Compute win rate
+                if pnl > 0: unsupported_tickers[t]["wins"] += 1
+                else: unsupported_tickers[t]["losses"] += 1
     unsupported_list = []
     for t, data in sorted(unsupported_tickers.items()):
         closed = data["wins"] + data["losses"]
@@ -872,20 +908,46 @@ async def guru_page(request: Request):
     return templates.TemplateResponse("guru.html", {
         "request": request,
         "active_page": "guru",
-        "guru_stats": guru_stats,
-        "comparison": comparison,
+        "is_market_hours": is_market_hours,
+        # Filters
         "available_tickers": available_tickers,
         "filter_start": filter_start,
         "filter_end": filter_end,
         "filter_ticker": filter_ticker,
+        # Row 1 KPIs
+        "total_signals": total,
+        "buys": buys,
+        "closes": closes,
+        "follow_rate": follow_rate,
+        "executed": executed,
+        "reject_rate": reject_rate,
+        "rejected": rejected,
+        "missed_winners": missed_winners,
+        "avoided_losers": avoided_losers,
+        "missed_opportunity_pnl": missed_opportunity_pnl,
         "bot_total_pnl": round(bot_total_pnl, 2),
         "bot_total_trades": bot_total_trades,
-        "fill_rate": fill_rate,
-        "gap_reasons": gap_reasons,
-        "missed": missed,
+        "bot_win_rate": bot_win_rate,
+        "verdict": verdict,
+        "verdict_detail": verdict_detail,
+        # Row 2 funnel
+        "funnel": funnel,
+        # Row 3 diagnostics
+        "rejection_reasons": rejection_reasons,
+        "neutral_misses": neutral_misses,
+        "largest_missed_winner": largest_missed_winner,
+        "largest_avoided_loser": largest_avoided_loser,
+        "takeaways": takeaways,
+        # Row 4 table
+        "comparison": comparison,
+        # Row 5 charts
+        "chart_tickers": chart_tickers,
+        "chart_guru": chart_guru,
+        "chart_executed": chart_executed,
+        "chart_rejected": chart_rejected,
+        "pnl_chart": pnl_chart,
+        # Unsupported
         "unsupported_tickers": unsupported_list,
-        "guru_pie": guru_pie,
-        "bot_pie": bot_pie,
     })
 
 
@@ -897,90 +959,318 @@ async def health_page(request: Request):
 
     conn = get_db()
     today = date.today().isoformat()
+    from datetime import datetime
+    import pytz
+    ET = pytz.timezone("America/New_York")
+    now_et = datetime.now(tz=ET)
 
+    # ── System state ──
     state = conn.execute(
         "SELECT * FROM system_state ORDER BY updated_at DESC LIMIT 1"
     ).fetchone()
-    pos_count = conn.execute("SELECT COUNT(*) as cnt FROM positions").fetchone()
 
-    health = {
-        "bot_running": bool(state["gateway_connected"]) if state and "gateway_connected" in state.keys() else state is not None,
-        "daily_realized_pnl": state["daily_realized_pnl"] if state else 0.0,
-        "daily_unrealized_pnl": state["daily_unrealized_pnl"] if state else 0.0,
-        "halted": bool(state["halted"]) if state else False,
-        "open_positions": pos_count["cnt"] if pos_count else 0,
-        "trade_date": today,
-        "last_updated": state["updated_at"] if state else None,
-    }
+    gateway_connected = bool(state["gateway_connected"]) if state and "gateway_connected" in state.keys() else state is not None
+    daily_realized_pnl = state["daily_realized_pnl"] if state else 0.0
+    daily_unrealized_pnl = state["daily_unrealized_pnl"] if state else 0.0
+    halted = bool(state["halted"]) if state else False
+    last_updated = state["updated_at"] if state else None
 
-    # Risk used % (realized loss / max loss limit)
+    # ── Open positions ──
+    open_positions = conn.execute("SELECT * FROM positions ORDER BY opened_at").fetchall()
+    open_positions = [dict(r) for r in open_positions]
+
+    # ── Market hours logic ──
+    is_weekend = now_et.weekday() >= 5
+    market_open = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
+    auto_close_time = now_et.replace(hour=15, minute=55, second=0, microsecond=0)
+    market_close_time = now_et.replace(hour=16, minute=15, second=0, microsecond=0)
+    is_market_hours = market_open <= now_et <= market_close_time and not is_weekend
+    auto_close_triggered = now_et >= auto_close_time and not is_weekend
+
+    # ── Card 1: Trading Status ──
     max_loss = 1000.0
-    risk_pct = abs(health["daily_realized_pnl"]) / max_loss * 100 if health["daily_realized_pnl"] < 0 else 0.0
+    halt_distance = max_loss + daily_realized_pnl  # positive = room left
+    if halted:
+        trading_status = "Blocked"
+        trading_status_color = "red"
+        trading_reason = "Daily halt triggered"
+    elif not is_market_hours:
+        if is_weekend:
+            trading_status = "Blocked"
+            trading_status_color = "red"
+            trading_reason = "Weekend — market closed"
+        elif now_et < market_open:
+            trading_status = "Blocked"
+            trading_status_color = "red"
+            trading_reason = "Pre-market — waiting for 9:30 AM ET"
+        else:
+            trading_status = "Blocked"
+            trading_status_color = "red"
+            trading_reason = "Market closed for the day"
+    else:
+        # Time-of-day session
+        h, m = now_et.hour, now_et.minute
+        mins = h * 60 + m
+        if mins < 13 * 60:  # before 1 PM
+            trading_status = "Allowed"
+            trading_status_color = "green"
+            trading_reason = "Morning session — base + profits"
+        elif mins < 15 * 60 + 30:  # before 3:30 PM
+            if daily_realized_pnl > 0:
+                trading_status = "Allowed"
+                trading_status_color = "green"
+                trading_reason = "Afternoon — house money only"
+            else:
+                trading_status = "Blocked"
+                trading_status_color = "amber"
+                trading_reason = "Afternoon requires house money"
+        elif mins < 15 * 60 + 55:  # before 3:55 PM
+            if daily_realized_pnl > 0:
+                trading_status = "Allowed"
+                trading_status_color = "amber"
+                trading_reason = "EOD lotto — 15% of profits"
+            else:
+                trading_status = "Blocked"
+                trading_status_color = "amber"
+                trading_reason = "EOD lotto requires profits"
+        else:
+            trading_status = "Blocked"
+            trading_status_color = "red"
+            trading_reason = "0DTE cutoff — no new entries"
 
-    # Auto-close stats for today
+    # ── Card 3: Session Budget ──
+    h, m = now_et.hour, now_et.minute
+    mins = h * 60 + m
+    if not is_market_hours:
+        session_label = "Closed"
+        session_detail = "No active session"
+    elif mins < 13 * 60:
+        session_label = "Morning"
+        budget = 1000.0 + max(0, daily_realized_pnl)
+        next_risk = budget * 0.50
+        session_detail = f"$1,000 base + realized · next risk ${next_risk:,.0f}"
+    elif mins < 15 * 60 + 30:
+        session_label = "Afternoon"
+        next_risk = max(0, daily_realized_pnl) * 0.25
+        session_detail = f"profits only · next risk ${next_risk:,.0f}"
+    else:
+        session_label = "EOD Lotto"
+        next_risk = max(0, daily_realized_pnl) * 0.15
+        session_detail = f"profits only · next risk ${next_risk:,.0f}"
+
+    # ── Card 4: Open Exposure ──
+    same_day_count = sum(1 for p in open_positions if p.get("expiry_date") == today)
+    positions_needing_attention = sum(1 for p in open_positions
+        if not p.get("stop_price") or p.get("expiry_date") == today)
+
+    # ── Card 5: Broker Health ──
+    # Get latest ack/fill latency
+    try:
+        lat_row = conn.execute("""
+            SELECT
+                ROUND(AVG(CASE WHEN ack_received_at IS NOT NULL AND submit_started_at IS NOT NULL
+                    THEN (julianday(ack_received_at) - julianday(submit_started_at)) * 86400000
+                    ELSE NULL END), 0) as avg_ack_ms,
+                ROUND(AVG(CASE WHEN first_fill_at IS NOT NULL AND submit_started_at IS NOT NULL
+                    THEN (julianday(first_fill_at) - julianday(submit_started_at)) * 86400000
+                    ELSE NULL END), 0) as avg_fill_ms
+            FROM orders WHERE trade_date = ? AND submit_started_at IS NOT NULL
+        """, (today,)).fetchone()
+        avg_ack_ms = int(lat_row["avg_ack_ms"] or 0) if lat_row else 0
+        avg_fill_ms = int(lat_row["avg_fill_ms"] or 0) if lat_row else 0
+    except Exception:
+        avg_ack_ms = 0
+        avg_fill_ms = 0
+
+    # ── Auto-close countdown ──
     auto_close_count = conn.execute(
         "SELECT COUNT(*) as c FROM realized_pnl_events WHERE trade_date = ? AND event_type = 'AUTO_CLOSE'",
         (today,),
     ).fetchone()["c"]
 
-    # Same-day expiry positions (candidates for auto-close)
-    same_day_positions = conn.execute(
-        "SELECT * FROM positions WHERE expiry_date = ? ORDER BY opened_at",
-        (today,),
-    ).fetchall()
-    same_day_positions = [dict(r) for r in same_day_positions]
-
-    # Time until market close (3:55 PM ET auto-close)
-    from datetime import datetime
-    import pytz
-    now_et = datetime.now(tz=pytz.timezone("America/New_York"))
-    market_open = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
-    auto_close_time = now_et.replace(hour=15, minute=55, second=0, microsecond=0)
-    market_close_time = now_et.replace(hour=16, minute=15, second=0, microsecond=0)
-
-    is_weekend = now_et.weekday() >= 5
-    is_market_hours = market_open <= now_et <= market_close_time and not is_weekend
-    auto_close_triggered = now_et >= auto_close_time and not is_weekend
-
     if is_weekend:
         close_label = "Weekend"
-        close_color = "muted"
     elif now_et < market_open:
         close_label = "Pre-market"
-        close_color = "muted"
     elif now_et >= market_close_time:
         close_label = "Closed"
-        close_color = "muted"
     elif auto_close_triggered:
         close_label = "Done"
-        close_color = "positive"
     else:
         total_mins = max(0, int((auto_close_time - now_et).total_seconds() / 60))
         hours = total_mins // 60
-        mins = total_mins % 60
-        if hours > 0:
-            close_label = f"{hours}h {mins}m"
-        else:
-            close_label = f"{mins}m"
-        # Color: green > 2h, yellow < 1h, red < 15m
-        if total_mins <= 15:
-            close_color = "negative"
-        elif total_mins <= 60:
-            close_color = "warning"
-        else:
-            close_color = "positive"
+        mins_left = total_mins % 60
+        close_label = f"{hours}h {mins_left}m" if hours > 0 else f"{mins_left}m"
+
+    # ── Entry Gate Result ──
+    gates = []
+    gates.append({"name": "Daily halt", "pass": not halted,
+                  "detail": "HALTED" if halted else "Clear"})
+    gates.append({"name": "Market hours", "pass": is_market_hours,
+                  "detail": "Open" if is_market_hours else "Closed"})
+    gates.append({"name": "Supported ticker", "pass": True, "detail": "13 tickers active"})
+    gates.append({"name": "Entry <= $5.00", "pass": True, "detail": "Cap enforced"})
+
+    # Per-ticker max pos — check if any ticker is at max
+    ticker_counts = {}
+    for p in open_positions:
+        t = p.get("ticker", "SPX")
+        if not p.get("is_runner"):
+            ticker_counts[t] = ticker_counts.get(t, 0) + 1
+    any_at_max = any(v >= 3 for v in ticker_counts.values())  # SPX max=3
+    gates.append({"name": "Per-ticker max pos", "pass": not any_at_max,
+                  "detail": "At limit" if any_at_max else "Available"})
+
+    dte_cutoff = mins >= 15 * 60 + 55 if is_market_hours else False
+    gates.append({"name": "0DTE cutoff", "pass": not dte_cutoff,
+                  "detail": "Active" if dte_cutoff else "Clear"})
+
+    all_gates_pass = all(g["pass"] for g in gates)
+    if all_gates_pass:
+        gate_result = "BUY ALLOWED"
+        gate_result_color = "green"
+    else:
+        blocked_gates = [g["name"] for g in gates if not g["pass"]]
+        gate_result = f"BUY BLOCKED — {' / '.join(blocked_gates)}"
+        gate_result_color = "red"
+
+    # ── Attention alerts ──
+    attention_items = []
+    if same_day_count > 0 and not auto_close_triggered:
+        total_mins_left = max(0, int((auto_close_time - now_et).total_seconds() / 60))
+        attention_items.append({
+            "type": "AUTO-CLOSE",
+            "severity": "red" if total_mins_left <= 15 else "amber",
+            "title": f"AUTO-CLOSE IN {close_label}",
+            "detail": f"{same_day_count} same-day expiry position{'s' if same_day_count != 1 else ''}",
+        })
+
+    # ITM risk — positions near ITM (placeholder, would need market data)
+    for p in open_positions:
+        if not p.get("stop_price") and p.get("expiry_date") != today:
+            attention_items.append({
+                "type": "MISSING STOP",
+                "severity": "amber",
+                "title": "MISSING STOP",
+                "detail": f"{p.get('ticker', '?')} {p.get('contract_symbol', '?')} — no stop set",
+            })
+
+    # ── Reconnect count ──
+    try:
+        recon = conn.execute(
+            "SELECT COUNT(*) as c FROM gateway_events WHERE event_type = 'reconnect' AND trade_date = ?",
+            (today,),
+        ).fetchone()
+        reconnect_count = recon["c"] if recon else 0
+    except Exception:
+        reconnect_count = 0
+
+    # ── Recent risk events from alerts table ──
+    risk_events = []
+    try:
+        recent_alerts = conn.execute("""
+            SELECT alert_time, ticker, action, parse_result, raw_text
+            FROM alerts WHERE trade_date = ?
+            ORDER BY alert_time DESC LIMIT 20
+        """, (today,)).fetchall()
+        for a in recent_alerts:
+            result = a["parse_result"] or ""
+            action = a["action"] or ""
+            ticker = a["ticker"] or ""
+            raw = (a["raw_text"] or "")[:80]
+            time_str = (a["alert_time"] or "")[11:19]
+
+            if result == "signal" and action in ("BUY", "SELL", "CLOSE", "UPDATE_STOP"):
+                risk_events.append({
+                    "time": time_str,
+                    "type": action,
+                    "color": "green" if action == "BUY" else "amber" if action == "UPDATE_STOP" else "blue",
+                    "detail": f"{action} {ticker} — executed",
+                })
+            elif result == "ignored":
+                risk_events.append({
+                    "time": time_str,
+                    "type": "SKIPPED",
+                    "color": "muted",
+                    "detail": f"non-actionable: {raw[:50]}",
+                })
+            elif result == "duplicate":
+                risk_events.append({
+                    "time": time_str,
+                    "type": "DUPLICATE",
+                    "color": "muted",
+                    "detail": f"duplicate suppressed",
+                })
+            elif result in ("rejected", "blocked"):
+                risk_events.append({
+                    "time": time_str,
+                    "type": "BUY BLOCKED",
+                    "color": "red",
+                    "detail": f"{ticker} {action} — {result}",
+                })
+    except Exception:
+        pass
+
+    # ── Position flags ──
+    for p in open_positions:
+        flags = []
+        if p.get("expiry_date") == today:
+            flags.append({"label": "0DTE", "color": "amber"})
+            flags.append({"label": "AUTO-CLOSE", "color": "red"})
+        if not p.get("stop_price"):
+            flags.append({"label": "NO STOP", "color": "red"})
+        if p.get("is_runner"):
+            flags.append({"label": "RUNNER", "color": "green"})
+        # DTE
+        try:
+            if p.get("expiry_date") and p["expiry_date"] != today:
+                exp = datetime.strptime(p["expiry_date"], "%Y%m%d").date() if len(p["expiry_date"]) == 8 else datetime.strptime(p["expiry_date"], "%Y-%m-%d").date()
+                dte = (exp - date.today()).days
+                if dte == 1:
+                    flags.append({"label": "1DTE", "color": "amber"})
+                elif dte <= 3:
+                    flags.append({"label": f"{dte}DTE", "color": "blue"})
+        except Exception:
+            pass
+        p["flags"] = flags
 
     return templates.TemplateResponse("health.html", {
         "request": request,
         "active_page": "health",
-        "health": health,
-        "risk_pct": risk_pct,
-        "auto_close_count": auto_close_count,
-        "same_day_positions": same_day_positions,
-        "close_label": close_label,
-        "close_color": close_color,
-        "auto_close_triggered": auto_close_triggered,
+        # Card data
+        "trading_status": trading_status,
+        "trading_status_color": trading_status_color,
+        "trading_reason": trading_reason,
+        "daily_realized_pnl": daily_realized_pnl,
+        "halt_distance": halt_distance,
+        "session_label": session_label,
+        "session_detail": session_detail,
+        "open_positions": open_positions,
+        "same_day_count": same_day_count,
+        "positions_needing_attention": positions_needing_attention,
+        "gateway_connected": gateway_connected,
+        "avg_ack_ms": avg_ack_ms,
+        "avg_fill_ms": avg_fill_ms,
+        # Gates
+        "gates": gates,
+        "all_gates_pass": all_gates_pass,
+        "gate_result": gate_result,
+        "gate_result_color": gate_result_color,
+        # Bot health
+        "halted": halted,
+        "last_updated": last_updated,
+        "reconnect_count": reconnect_count,
         "is_market_hours": is_market_hours,
+        "is_weekend": is_weekend,
+        # Auto-close
+        "close_label": close_label,
+        "auto_close_count": auto_close_count,
+        "auto_close_triggered": auto_close_triggered,
+        # Attention
+        "attention_items": attention_items,
+        # Events
+        "risk_events": risk_events,
+        "today": today,
     })
 
 

@@ -2,15 +2,22 @@
 {% block title %}Guru vs Bot - Trading Journal{% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <h1 class="page-title">Guru vs Bot Performance</h1>
-    <p class="page-subtitle">Signal quality vs execution quality — split view</p>
+<div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start;">
+    <div>
+        <h1 class="page-title">Guru vs Bot Execution Review</h1>
+        <p class="page-subtitle">Signal conversion, rejection analysis, and missed-opportunity diagnostics</p>
+    </div>
+    <span style="padding:0.3rem 0.75rem; border-radius:12px; font-size:0.75rem; font-weight:600;
+        {{ 'background:rgba(46,204,113,0.15); color:#2ecc71;' if is_market_hours else 'background:rgba(139,148,158,0.15); color:#8b949e;' }}">
+        {{ "Market Open" if is_market_hours else "Market Closed" }}
+    </span>
 </div>
 
 <!-- Filters -->
-<div class="filters">
+<div class="filters" style="margin-bottom:1rem;">
     <form method="GET" action="/guru" style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
         <input type="date" name="start" value="{{ filter_start or '' }}" placeholder="Start">
+        <span style="color:var(--text-muted);">to</span>
         <input type="date" name="end" value="{{ filter_end or '' }}" placeholder="End">
         <select name="ticker">
             <option value="">All tickers</option>
@@ -23,348 +30,384 @@
     </form>
 </div>
 
-<!-- Three-panel: Signal Quality + Execution Quality + Gap to Investigate -->
-<div class="three-col" style="margin-bottom:1.5rem;">
-
-    <!-- Signal Quality -->
-    <div class="card">
-        <div style="font-weight:600; margin-bottom:0.15rem;">Signal Quality</div>
-        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:1.25rem;">What the guru actually sent</div>
-        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem; text-align:center;">
-            <div>
-                <div class="label">Signals</div>
-                <div style="font-size:1.6rem; font-weight:700; font-family:var(--font-mono);">{{ guru_stats.total_signals }}</div>
-            </div>
-            <div>
-                <div class="label">Entries</div>
-                <div style="font-size:1.6rem; font-weight:700; font-family:var(--font-mono);">{{ guru_stats.buys }}</div>
-            </div>
-            <div>
-                <div class="label">Exits</div>
-                <div style="font-size:1.6rem; font-weight:700; font-family:var(--font-mono);">{{ guru_stats.closes }}</div>
-            </div>
-        </div>
+<!-- ═══ ROW 1: Six KPI Cards ═══ -->
+<div style="display:grid; grid-template-columns:repeat(6, 1fr); gap:0.75rem; margin-bottom:1rem;">
+    <!-- Guru Signals -->
+    <div class="card" style="padding:0.75rem 1rem;">
+        <div style="font-size:0.6rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); margin-bottom:0.35rem;">Guru Signals</div>
+        <div style="font-size:1.6rem; font-weight:700; font-family:var(--font-mono); color:var(--text-primary);">{{ total_signals }}</div>
+        <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.2rem;">entries {{ buys }} · exits {{ closes }}</div>
     </div>
 
-    <!-- Execution Quality -->
-    <div class="card">
-        <div style="font-weight:600; margin-bottom:0.15rem;">Execution Quality</div>
-        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:1.25rem;">How well the bot followed</div>
-        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem; text-align:center;">
-            <div>
-                <div class="label">Executed</div>
-                <div style="font-size:1.6rem; font-weight:700; font-family:var(--font-mono);">{{ guru_stats.executed }}</div>
-            </div>
-            <div>
-                <div class="label">Fill Rate</div>
-                <div style="font-size:1.6rem; font-weight:700; font-family:var(--font-mono); color:{% if fill_rate >= 75 %}var(--green){% elif fill_rate >= 50 %}var(--yellow){% elif fill_rate >= 30 %}var(--red){% else %}#d32f2f{% endif %};">{{ "%.1f"|format(fill_rate) }}%</div>
-            </div>
-            <div>
-                <div class="label">P&L</div>
-                <div style="font-size:1.6rem; font-weight:700; font-family:var(--font-mono); color:{{ 'var(--green)' if bot_total_pnl > 0 else 'var(--red)' if bot_total_pnl < 0 else 'var(--text-primary)' }};">
-                    {{ '+' if bot_total_pnl >= 0 }}${{ "%.0f"|format(bot_total_pnl) }}
-                </div>
-            </div>
-        </div>
+    <!-- Bot Follow Rate -->
+    <div class="card" style="padding:0.75rem 1rem;">
+        <div style="font-size:0.6rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); margin-bottom:0.35rem;">Bot Follow Rate</div>
+        <div style="font-size:1.6rem; font-weight:700; font-family:var(--font-mono); color:{{ '#2ecc71' if follow_rate >= 80 else '#f39c12' if follow_rate >= 50 else '#e74c3c' }};">{{ "%.1f"|format(follow_rate) }}%</div>
+        <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.2rem;">{{ executed }} executed of {{ total_signals }}</div>
     </div>
 
-    <!-- Gap to Investigate -->
-    <div class="card">
-        <div style="font-weight:600; margin-bottom:0.15rem;">Gap to Investigate</div>
-        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:1rem;">Missed opportunities</div>
-        <div style="font-size:0.9rem; margin-bottom:0.75rem;">
-            Potential misses: <strong>{{ missed }}</strong>
+    <!-- Reject Rate -->
+    <div class="card" style="padding:0.75rem 1rem;">
+        <div style="font-size:0.6rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); margin-bottom:0.35rem;">Reject Rate</div>
+        <div style="font-size:1.6rem; font-weight:700; font-family:var(--font-mono); color:#e74c3c;">{{ "%.1f"|format(reject_rate) }}%</div>
+        <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.2rem;">{{ rejected }} rejected</div>
+    </div>
+
+    <!-- Missed Opportunity -->
+    <div class="card" style="padding:0.75rem 1rem;">
+        <div style="font-size:0.6rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); margin-bottom:0.35rem;">Missed Opportunity</div>
+        <div style="font-size:1.6rem; font-weight:700; font-family:var(--font-mono);
+            {{ 'color:#2ecc71;' if missed_opportunity_pnl > 0 else 'color:#e74c3c;' if missed_opportunity_pnl < 0 else 'color:var(--text-primary);' }}">
+            {{ '+' if missed_opportunity_pnl >= 0 }}${{ "%.0f"|format(missed_opportunity_pnl) }}
         </div>
-        {% if gap_reasons %}
-        <div style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:0.5rem;">Likely causes:</div>
-        <ul style="list-style:none; padding:0; margin:0;">
-            {% for reason, count in gap_reasons %}
-            <li style="font-size:0.8rem; color:var(--text-secondary); padding:0.15rem 0;">
-                &bull; {{ reason }} <span style="color:var(--text-muted);">({{ count }})</span>
-            </li>
-            {% endfor %}
-        </ul>
+        <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.2rem;">{{ missed_winners }} missed winners · {{ avoided_losers }} avoided</div>
+    </div>
+
+    <!-- Bot Realized P&L -->
+    <div class="card" style="padding:0.75rem 1rem;">
+        <div style="font-size:0.6rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); margin-bottom:0.35rem;">Bot Realized P&L</div>
+        <div style="font-size:1.6rem; font-weight:700; font-family:var(--font-mono);
+            {{ 'color:#2ecc71;' if bot_total_pnl > 0 else 'color:#e74c3c;' if bot_total_pnl < 0 else 'color:var(--text-primary);' }}">
+            {{ '+' if bot_total_pnl >= 0 }}${{ "%.0f"|format(bot_total_pnl) }}
+        </div>
+        <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.2rem;">{{ bot_total_trades }} trades · win rate {{ "%.1f"|format(bot_win_rate) }}%</div>
+    </div>
+
+    <!-- Quality Verdict -->
+    <div class="card" style="padding:0.75rem 1rem; border-left:3px solid #bc8cff;">
+        <div style="font-size:0.6rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); margin-bottom:0.35rem;">Quality Verdict</div>
+        <div style="font-size:1.3rem; font-weight:700; font-family:var(--font-mono); color:#bc8cff;">{{ verdict }}</div>
+        <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.2rem; white-space:pre-line;">{{ verdict_detail }}</div>
+    </div>
+</div>
+
+<!-- ═══ ROW 2: Conversion Funnel ═══ -->
+<div class="card" style="padding:1rem 1.25rem; margin-bottom:1rem;">
+    <div style="font-weight:600; font-size:1rem; margin-bottom:0.15rem;">Guru → Bot Conversion Funnel</div>
+    <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:1rem;">Where signals dropped off across the decision pipeline</div>
+
+    <div style="display:grid; grid-template-columns:repeat({{ funnel|length }}, 1fr); gap:0.5rem;">
+        {% for stage in funnel %}
+        <div style="text-align:center; padding:0.75rem 0.5rem; border:1px solid var(--border); border-radius:8px; background:var(--bg-secondary); position:relative;">
+            <div style="font-size:1.5rem; font-weight:700; font-family:var(--font-mono); color:var(--text-primary);">{{ stage.value }}</div>
+            <div style="position:absolute; bottom:0; left:0; right:0; height:4px; border-radius:0 0 8px 8px; background:{{ stage.color }}; opacity:0.7;"></div>
+        </div>
+        {% endfor %}
+    </div>
+    <div style="display:grid; grid-template-columns:repeat({{ funnel|length }}, 1fr); gap:0.5rem; margin-top:0.35rem;">
+        {% for stage in funnel %}
+        <div style="text-align:center; font-size:0.7rem; color:var(--text-muted);">{{ stage.label }}</div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- ═══ ROW 3: Three Diagnostic Panels ═══ -->
+<div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem; margin-bottom:1rem;">
+    <!-- Top Rejection Reasons -->
+    <div class="card" style="padding:1rem 1.25rem;">
+        <div style="font-weight:600; font-size:0.95rem; margin-bottom:0.15rem;">Top Rejection Reasons</div>
+        <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.75rem;">Ranked reasons by count and type</div>
+
+        {% if rejection_reasons %}
+        {% for rr in rejection_reasons[:6] %}
+        <div style="display:flex; align-items:center; gap:0.4rem; padding:0.4rem 0; {{ 'border-top:1px solid var(--border);' if not loop.first }}">
+            <span style="flex:1; font-size:0.78rem; color:var(--text-secondary);">{{ rr.reason[:35] }}</span>
+            <span style="font-size:0.6rem; padding:0.12rem 0.35rem; border-radius:3px;
+                {{ 'background:rgba(231,76,60,0.15); color:#e74c3c;' if rr.type == 'Risk' else 'background:rgba(52,152,219,0.15); color:#3498db;' if rr.type == 'Duplicate' else 'background:rgba(243,156,18,0.15); color:#f39c12;' if rr.type == 'Price' else 'background:rgba(231,76,60,0.15); color:#e74c3c;' }}">{{ rr.type }}</span>
+            <span style="font-size:0.6rem; padding:0.12rem 0.35rem; border-radius:3px;
+                {{ 'background:rgba(46,204,113,0.12); color:#2ecc71;' if rr.impact == 'Protected' else 'background:rgba(52,152,219,0.12); color:#3498db;' if rr.impact == 'Neutral' else 'background:rgba(243,156,18,0.12); color:#f39c12;' }}">{{ rr.impact }}</span>
+            <span style="font-size:0.82rem; font-weight:600; font-family:var(--font-mono); color:var(--text-primary); min-width:1.5rem; text-align:right;">{{ rr.count }}</span>
+        </div>
+        {% endfor %}
         {% else %}
-        <div style="font-size:0.8rem; color:var(--text-muted);">No rejections — perfect execution</div>
+        <div style="color:var(--text-muted); font-size:0.82rem; padding:1rem 0; text-align:center;">No rejections</div>
         {% endif %}
     </div>
 
+    <!-- Miss Quality Analysis -->
+    <div class="card" style="padding:1rem 1.25rem;">
+        <div style="font-weight:600; font-size:0.95rem; margin-bottom:0.15rem;">Miss Quality Analysis</div>
+        <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.75rem;">Were the misses bad misses or good misses?</div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.5rem; margin-bottom:1rem;">
+            <div>
+                <div style="font-size:0.7rem; color:var(--text-muted);">Profitable misses</div>
+                <div style="font-size:1.3rem; font-weight:700; font-family:var(--font-mono); color:#2ecc71;">{{ missed_winners }}</div>
+            </div>
+            <div>
+                <div style="font-size:0.7rem; color:var(--text-muted);">Avoided losers</div>
+                <div style="font-size:1.3rem; font-weight:700; font-family:var(--font-mono); color:#3498db;">{{ avoided_losers }}</div>
+            </div>
+            <div>
+                <div style="font-size:0.7rem; color:var(--text-muted);">Neutral misses</div>
+                <div style="font-size:1.3rem; font-weight:700; font-family:var(--font-mono); color:var(--text-secondary);">{{ neutral_misses }}</div>
+            </div>
+        </div>
+
+        <div style="border-top:1px solid var(--border); padding-top:0.6rem;">
+            <div style="display:flex; justify-content:space-between; padding:0.25rem 0;">
+                <span style="font-size:0.78rem; color:var(--text-muted);">Largest missed winner</span>
+                <span style="font-size:0.82rem; font-weight:600; font-family:var(--font-mono); color:#2ecc71;">
+                    {{ largest_missed_winner.ticker }} +${{ "%.0f"|format(largest_missed_winner.pnl) }}
+                </span>
+            </div>
+            <div style="display:flex; justify-content:space-between; padding:0.25rem 0;">
+                <span style="font-size:0.78rem; color:var(--text-muted);">Largest avoided loser</span>
+                <span style="font-size:0.82rem; font-weight:600; font-family:var(--font-mono); color:#e74c3c;">
+                    {{ largest_avoided_loser.ticker }} -${{ "%.0f"|format(largest_avoided_loser.pnl|abs) }}
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Operator Takeaway -->
+    <div class="card" style="padding:1rem 1.25rem;">
+        <div style="font-weight:600; font-size:0.95rem; margin-bottom:0.15rem;">Operator Takeaway</div>
+        <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.75rem;">One-screen summary of what mattered</div>
+
+        {% for item in takeaways %}
+        <div style="padding:0.4rem 0; {{ 'border-top:1px solid var(--border);' if not loop.first }}">
+            <div style="font-size:0.82rem; font-weight:600; color:var(--text-primary);">{{ item.title }}</div>
+            <div style="font-size:0.75rem; color:var(--text-secondary);">{{ item.detail }}</div>
+        </div>
+        {% endfor %}
+        {% if not takeaways %}
+        <div style="color:var(--text-muted); font-size:0.82rem; padding:1rem 0; text-align:center;">Insufficient data</div>
+        {% endif %}
+    </div>
 </div>
 
-<!-- Per-Ticker Comparison -->
-<div class="table-wrap">
-    <div class="table-header">Per-Ticker Comparison <span class="table-sub">Signal quality vs execution quality by ticker</span></div>
-    <table>
-        <thead>
-            <tr>
-                <th>Ticker</th>
-                <th>Guru Signals</th>
-                <th>Guru Entries</th>
-                <th>Guru Exits</th>
-                <th>Bot Executed</th>
-                <th>Bot Rejected</th>
-                <th>Bot Trades</th>
-                <th>Bot Win Rate</th>
-                <th>Bot P&L</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for row in comparison %}
-            <tr>
-                <td><strong>{{ row.ticker }}</strong></td>
-                <td>{{ row.guru_signals }}</td>
-                <td>{{ row.guru_buys }}</td>
-                <td>{{ row.guru_closes }}</td>
-                <td>
-                    <span class="badge badge-green">{{ row.bot_executed }}</span>
-                </td>
-                <td>
-                    {% if row.bot_rejected > 0 %}
-                    <span class="badge badge-red">{{ row.bot_rejected }}</span>
-                    {% else %}0{% endif %}
-                </td>
-                <td>{{ row.bot_trades }}</td>
-                <td>{{ "%.1f"|format(row.bot_win_rate) }}%</td>
-                <td class="{{ 'pnl-positive' if row.bot_pnl > 0 else 'pnl-negative' if row.bot_pnl < 0 else 'pnl-zero' }}">
-                    {{ '+' if row.bot_pnl >= 0 }}${{ "%.2f"|format(row.bot_pnl) }}
-                </td>
-            </tr>
+<!-- ═══ ROW 4: Per-Ticker Conversion Table ═══ -->
+<div class="card" style="padding:1rem 1.25rem; margin-bottom:1rem;">
+    <div style="font-weight:600; font-size:1rem; margin-bottom:0.15rem;">Per-Ticker Conversion Table</div>
+    <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.75rem;">Activity → conversion → outcome by ticker</div>
+
+    <div class="table-wrap" style="border:none;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Ticker</th>
+                    <th>Guru</th>
+                    <th>Eligible</th>
+                    <th>Executed</th>
+                    <th>Rejected</th>
+                    <th>Follow Rate</th>
+                    <th>Trades</th>
+                    <th>Win Rate</th>
+                    <th>Bot P&L</th>
+                    <th>Verdict</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in comparison %}
+                <tr>
+                    <td><strong>{{ row.ticker }}</strong></td>
+                    <td>{{ row.guru }}</td>
+                    <td>{{ row.eligible }}</td>
+                    <td><span class="badge badge-green">{{ row.executed }}</span></td>
+                    <td>{% if row.rejected > 0 %}<span class="badge badge-red">{{ row.rejected }}</span>{% else %}0{% endif %}</td>
+                    <td style="font-family:var(--font-mono);">{{ "%.0f"|format(row.follow_rate) }}%</td>
+                    <td>{{ row.trades }}</td>
+                    <td style="font-family:var(--font-mono);">{{ "%.1f"|format(row.win_rate) }}%</td>
+                    <td style="font-family:var(--font-mono); font-weight:600;
+                        {{ 'color:#2ecc71;' if row.bot_pnl > 0 else 'color:#e74c3c;' if row.bot_pnl < 0 else '' }}">
+                        {{ '+' if row.bot_pnl >= 0 }}${{ "%.0f"|format(row.bot_pnl) }}
+                    </td>
+                    <td style="font-size:0.78rem; color:var(--text-secondary);">{{ row.verdict }}</td>
+                </tr>
+                {% endfor %}
+                {% if not comparison %}
+                <tr><td colspan="10" style="text-align:center; color:var(--text-secondary); padding:2rem;">No data yet</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ═══ ROW 5: Two Charts ═══ -->
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1.5rem;">
+    <!-- Coverage Gap by Ticker -->
+    <div class="card" style="padding:1rem 1.25rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+            <div>
+                <div style="font-weight:600; font-size:0.95rem;">Coverage Gap by Ticker</div>
+                <div style="font-size:0.72rem; color:var(--text-muted);">Guru signals vs bot executed vs rejected</div>
+            </div>
+            <div style="display:flex; gap:0.5rem; font-size:0.65rem;">
+                <span style="padding:0.15rem 0.4rem; border-radius:3px; background:rgba(52,152,219,0.2); color:#3498db;">Guru</span>
+                <span style="padding:0.15rem 0.4rem; border-radius:3px; background:rgba(46,204,113,0.2); color:#2ecc71;">Executed</span>
+                <span style="padding:0.15rem 0.4rem; border-radius:3px; background:rgba(231,76,60,0.2); color:#e74c3c;">Rejected</span>
+            </div>
+        </div>
+        <div style="height:220px;">
+            <canvas id="coverageChart"></canvas>
+        </div>
+    </div>
+
+    <!-- Bot P&L by Ticker -->
+    <div class="card" style="padding:1rem 1.25rem;">
+        <div style="font-weight:600; font-size:0.95rem; margin-bottom:0.15rem;">Bot P&L by Ticker</div>
+        <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.75rem;">Sorted by realized contribution</div>
+
+        {% if pnl_chart %}
+        <div style="margin-top:0.5rem;">
+            {% set max_abs_pnl = [1] %}
+            {% for item in pnl_chart %}
+                {% if item.pnl|abs > max_abs_pnl[0] %}{% set _ = max_abs_pnl.pop() %}{% set _ = max_abs_pnl.append(item.pnl|abs) %}{% endif %}
             {% endfor %}
-            {% if not comparison %}
-            <tr><td colspan="9" style="text-align:center; color:var(--text-secondary); padding:2rem;">No data yet</td></tr>
-            {% endif %}
-        </tbody>
-    </table>
-</div>
-
-<!-- Win Rate by Ticker — Guru vs Bot Pie Charts -->
-{% if guru_pie or bot_pie %}
-<div class="two-col" style="margin-top:1.5rem; margin-bottom:1.5rem;">
-    <div class="card">
-        <div style="font-weight:600; margin-bottom:0.15rem;">Guru Win% by Ticker</div>
-        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:1rem;">Based on guru's entry→exit price pairs</div>
-        <div style="height:280px; position:relative;">
-            <canvas id="guruPieChart"></canvas>
+            {% for item in pnl_chart %}
+            <div style="display:flex; align-items:center; gap:0.5rem; padding:0.4rem 0; {{ 'border-top:1px solid var(--border);' if not loop.first }}">
+                <span style="font-size:0.82rem; font-weight:600; min-width:50px;">{{ item.ticker }}</span>
+                <div style="flex:1; height:18px; position:relative; display:flex; justify-content:{{ 'flex-start' if item.pnl >= 0 else 'flex-end' }};">
+                    <div style="height:100%; border-radius:3px; min-width:2px;
+                        width:{{ (item.pnl|abs / max_abs_pnl[0] * 100)|int }}%;
+                        {{ 'background:#2ecc71;' if item.pnl >= 0 else 'background:#e74c3c;' }}"></div>
+                </div>
+                <span style="font-size:0.82rem; font-weight:600; font-family:var(--font-mono); min-width:65px; text-align:right;
+                    {{ 'color:#2ecc71;' if item.pnl >= 0 else 'color:#e74c3c;' }}">
+                    {{ '+' if item.pnl >= 0 }}${{ "%.0f"|format(item.pnl) }}
+                </span>
+            </div>
+            {% endfor %}
         </div>
-    </div>
-    <div class="card">
-        <div style="font-weight:600; margin-bottom:0.15rem;">Bot Win% by Ticker</div>
-        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:1rem;">Based on actual realized P&L</div>
-        <div style="height:280px; position:relative;">
-            <canvas id="botPieChart"></canvas>
-        </div>
+        {% else %}
+        <div style="text-align:center; color:var(--text-secondary); padding:2rem;">No P&L data yet</div>
+        {% endif %}
     </div>
 </div>
-{% endif %}
 
-<!-- Unsupported Ticker Performance -->
+<!-- ═══ Unsupported Ticker Tracking ═══ -->
 {% if unsupported_tickers %}
-<div class="table-wrap" style="margin-top:1.5rem;">
-    <div class="table-header">Unsupported Ticker Tracking <span class="table-sub">Guru performance on tickers we don't trade — use to decide what to add</span></div>
-    <table>
-        <thead>
-            <tr>
-                <th>Ticker</th>
-                <th>Signals</th>
-                <th>Entries</th>
-                <th>Exits</th>
-                <th>Open</th>
-                <th>Closed</th>
-                <th>Wins</th>
-                <th>Losses</th>
-                <th>Win Rate</th>
-                <th>Est. P&L</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for t in unsupported_tickers %}
-            <tr>
-                <td><strong>{{ t.ticker }}</strong></td>
-                <td>{{ t.total_signals }}</td>
-                <td>{{ t.entries }}</td>
-                <td>{{ t.exits }}</td>
-                <td>{% if t.open_entries > 0 %}<span class="badge badge-yellow">{{ t.open_entries }}</span>{% else %}0{% endif %}</td>
-                <td>{{ t.closed_trades }}</td>
-                <td class="pnl-positive">{{ t.wins }}</td>
-                <td class="pnl-negative">{{ t.losses }}</td>
-                <td style="font-family:var(--font-mono);">
-                    {% if t.closed_trades > 0 %}
-                    <span style="color:{% if t.win_rate >= 60 %}var(--green){% elif t.win_rate >= 40 %}var(--yellow){% else %}var(--red){% endif %};">
-                        {{ "%.1f"|format(t.win_rate) }}%
-                    </span>
-                    {% else %}—{% endif %}
-                </td>
-                <td class="{{ 'pnl-positive' if t.total_pnl > 0 else 'pnl-negative' if t.total_pnl < 0 else 'pnl-zero' }}" style="font-family:var(--font-mono);">
-                    {% if t.closed_trades > 0 %}{{ '+' if t.total_pnl >= 0 }}${{ "%.0f"|format(t.total_pnl) }}{% else %}—{% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    <div style="padding:0.75rem 1rem; font-size:0.78rem; color:var(--text-muted); border-top:1px solid var(--border);">
-        P&L estimated from guru's entry/exit prices × 1 contract (100 shares). Add ticker to TICKER_CONFIG if performance justifies it.
+<div class="card" style="padding:1rem 1.25rem; margin-bottom:1rem;">
+    <div style="font-weight:600; font-size:1rem; margin-bottom:0.15rem;">Unsupported Ticker Tracking</div>
+    <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.75rem;">Guru performance on tickers we don't trade — use to decide what to add</div>
+    <div class="table-wrap" style="border:none;">
+        <table>
+            <thead>
+                <tr><th>Ticker</th><th>Signals</th><th>Entries</th><th>Exits</th><th>Open</th><th>Closed</th><th>Wins</th><th>Losses</th><th>Win Rate</th><th>Est. P&L</th></tr>
+            </thead>
+            <tbody>
+                {% for t in unsupported_tickers %}
+                <tr>
+                    <td><strong>{{ t.ticker }}</strong></td>
+                    <td>{{ t.total_signals }}</td>
+                    <td>{{ t.entries }}</td>
+                    <td>{{ t.exits }}</td>
+                    <td>{% if t.open_entries > 0 %}<span class="badge badge-yellow">{{ t.open_entries }}</span>{% else %}0{% endif %}</td>
+                    <td>{{ t.closed_trades }}</td>
+                    <td class="pnl-positive">{{ t.wins }}</td>
+                    <td class="pnl-negative">{{ t.losses }}</td>
+                    <td style="font-family:var(--font-mono);">{% if t.closed_trades > 0 %}{{ "%.1f"|format(t.win_rate) }}%{% else %}—{% endif %}</td>
+                    <td style="font-family:var(--font-mono); {{ 'color:#2ecc71;' if t.total_pnl > 0 else 'color:#e74c3c;' if t.total_pnl < 0 else '' }}">
+                        {% if t.closed_trades > 0 %}{{ '+' if t.total_pnl >= 0 }}${{ "%.0f"|format(t.total_pnl) }}{% else %}—{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
 </div>
 {% endif %}
 
-<!-- Recent Guru Signals (AJAX paginated) -->
-<div class="table-wrap" style="margin-top:1.5rem;" id="guru-signals-section">
-    <div class="table-header">Recent Guru Signals <span class="table-sub">Useful as a source audit, not just a trade log</span></div>
-    <table>
-        <thead>
-            <tr>
-                <th>Time</th>
-                <th>Source</th>
-                <th>Ticker</th>
-                <th>Action</th>
-                <th>Strike</th>
-                <th>R</th>
-                <th>Entry</th>
-                <th>Executed?</th>
-                <th>Outcome</th>
-                <th>Reason</th>
-            </tr>
-        </thead>
-        <tbody id="guru-signals-body">
-            <tr><td colspan="10" style="text-align:center; color:var(--text-secondary); padding:2rem;">Loading...</td></tr>
-        </tbody>
-    </table>
-    <div id="guru-signals-pagination" style="display:flex; justify-content:center; align-items:center; gap:0.5rem; padding:0.75rem 1rem; border-top:1px solid var(--border);"></div>
+<!-- ═══ Recent Guru Signals (AJAX paginated) ═══ -->
+<div class="card" style="padding:1rem 1.25rem; margin-bottom:1.5rem;" id="guru-signals-section">
+    <div style="font-weight:600; font-size:1rem; margin-bottom:0.15rem;">Recent Guru Signals</div>
+    <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.75rem;">Source audit log</div>
+    <div class="table-wrap" style="border:none;">
+        <table>
+            <thead>
+                <tr><th>Time</th><th>Source</th><th>Ticker</th><th>Action</th><th>Strike</th><th>R</th><th>Entry</th><th>Executed?</th><th>Outcome</th><th>Reason</th></tr>
+            </thead>
+            <tbody id="guru-signals-body">
+                <tr><td colspan="10" style="text-align:center; color:var(--text-secondary); padding:2rem;">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <div id="guru-signals-pagination" style="display:flex; justify-content:center; align-items:center; gap:0.5rem; padding:0.75rem 0;"></div>
 </div>
 
 <script>
-let currentSignalsPage = 1;
-
-function actionBadge(action) {
-    if (action === 'BUY') return '<span class="badge badge-green">buy</span>';
-    if (action === 'CLOSE' || action === 'SELL') return '<span class="badge badge-red">close</span>';
-    if (action === 'PARTIAL_CLOSE') return '<span class="badge badge-yellow">partial</span>';
-    return '<span class="badge badge-yellow">' + (action || '').toLowerCase() + '</span>';
+// Coverage Gap Chart
+{% if chart_tickers %}
+const coverageCtx = document.getElementById('coverageChart');
+if (coverageCtx) {
+    new Chart(coverageCtx, {
+        type: 'bar',
+        data: {
+            labels: {{ chart_tickers | tojson }},
+            datasets: [
+                { label: 'Guru', data: {{ chart_guru | tojson }}, backgroundColor: 'rgba(52,152,219,0.7)', borderRadius: 4 },
+                { label: 'Executed', data: {{ chart_executed | tojson }}, backgroundColor: 'rgba(46,204,113,0.7)', borderRadius: 4 },
+                { label: 'Rejected', data: {{ chart_rejected | tojson }}, backgroundColor: 'rgba(231,76,60,0.7)', borderRadius: 4 },
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                y: { beginAtZero: true, ticks: { color: '#6e7681' }, grid: { color: 'rgba(255,255,255,0.04)' } },
+                x: { ticks: { color: '#8b949e', font: { weight: 600 } }, grid: { display: false } }
+            }
+        }
+    });
 }
+{% endif %}
 
-function outcomeBadge(outcome) {
-    if (outcome === 'filled') return '<span class="badge badge-green">filled</span>';
-    if (outcome === 'rejected') return '<span class="badge badge-red">rejected</span>';
-    return '<span class="badge badge-muted">' + (outcome || '—') + '</span>';
+// Guru signals AJAX
+function actionBadge(a) {
+    if (a === 'BUY') return '<span class="badge badge-green">buy</span>';
+    if (a === 'CLOSE' || a === 'SELL') return '<span class="badge badge-red">close</span>';
+    if (a === 'PARTIAL_CLOSE') return '<span class="badge badge-yellow">partial</span>';
+    return '<span class="badge badge-yellow">' + (a || '').toLowerCase() + '</span>';
 }
-
+function outcomeBadge(o) {
+    if (o === 'filled') return '<span class="badge badge-green">filled</span>';
+    if (o === 'rejected') return '<span class="badge badge-red">rejected</span>';
+    return '<span class="badge badge-muted">' + (o || '—') + '</span>';
+}
 function loadGuruSignals(page) {
-    currentSignalsPage = page;
     const params = new URLSearchParams();
     params.set('page', page);
     {% if filter_start %}params.set('start', '{{ filter_start }}');{% endif %}
     {% if filter_end %}params.set('end', '{{ filter_end }}');{% endif %}
     {% if filter_ticker %}params.set('ticker', '{{ filter_ticker }}');{% endif %}
-
-    fetch('/api/guru/signals?' + params.toString())
-        .then(r => r.json())
-        .then(data => {
-            const tbody = document.getElementById('guru-signals-body');
-            if (!data.signals || data.signals.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-secondary);padding:2rem;">No guru signals recorded yet</td></tr>';
-            } else {
-                tbody.innerHTML = data.signals.map(s => {
-                    const time = s.signal_time ? s.signal_time.substring(5, 16) : '';
-                    const srcClass = s.source === 'telegram' ? 'badge-blue' : 'badge-purple';
-                    const strike = s.strike ? Math.round(s.strike) : '—';
-                    const entry = s.entry_price ? '$' + s.entry_price.toFixed(2) : '—';
-                    const executed = s.we_executed ? '<span class="badge badge-green">Yes</span>' : '<span class="badge badge-red">No</span>';
-                    return '<tr>' +
-                        '<td style="white-space:nowrap;">' + time + '</td>' +
-                        '<td><span class="badge ' + srcClass + '">' + s.source + '</span></td>' +
-                        '<td><strong>' + s.ticker + '</strong></td>' +
-                        '<td>' + actionBadge(s.action) + '</td>' +
-                        '<td>' + strike + '</td>' +
-                        '<td>' + (s.right || '—') + '</td>' +
-                        '<td>' + entry + '</td>' +
-                        '<td>' + executed + '</td>' +
-                        '<td>' + outcomeBadge(s.our_outcome) + '</td>' +
-                        '<td style="font-size:0.78rem;color:var(--text-secondary);">' + (s.our_reject_reason || '') + '</td>' +
-                        '</tr>';
-                }).join('');
-            }
-
-            // Pagination
-            const pag = document.getElementById('guru-signals-pagination');
-            if (data.total_pages <= 1) { pag.innerHTML = ''; return; }
-            let html = '';
-            if (data.page > 1) html += pgBtn(data.page - 1, '&laquo; Prev');
-            for (let p = 1; p <= data.total_pages; p++) {
-                if (p === data.page) {
-                    html += '<span style="padding:4px 10px;border:1px solid var(--accent);border-radius:4px;color:var(--accent);font-size:0.8rem;font-weight:600;">' + p + '</span>';
-                } else if (p <= 3 || p >= data.total_pages - 1 || Math.abs(p - data.page) <= 1) {
-                    html += pgBtn(p, p);
-                } else if (p === 4 || p === data.total_pages - 2) {
-                    html += '<span style="color:var(--text-muted);font-size:0.8rem;">...</span>';
-                }
-            }
-            if (data.page < data.total_pages) html += pgBtn(data.page + 1, 'Next &raquo;');
-            pag.innerHTML = html;
-        });
-}
-
-function pgBtn(page, label) {
-    return '<a href="#guru-signals-section" onclick="loadGuruSignals(' + page + ');return false;" ' +
-        'style="padding:4px 10px;border:1px solid var(--border);border-radius:4px;color:var(--text-secondary);text-decoration:none;font-size:0.8rem;cursor:pointer;">' + label + '</a>';
-}
-
-// Load page 1 on init
-loadGuruSignals(1);
-</script>
-
-{% if guru_pie or bot_pie %}
-<script>
-const pieColors = [
-    '#58a6ff', '#3fb950', '#f85149', '#d29922', '#bc8cff',
-    '#db6d28', '#39d353', '#f778ba', '#79c0ff', '#56d4dd',
-    '#e3b341', '#ff7b72', '#a5d6ff', '#7ee787', '#ffa657'
-];
-
-function buildPieChart(canvasId, data) {
-    const ctx = document.getElementById(canvasId);
-    if (!ctx || !data.length) return;
-    new Chart(ctx, {
-        type: 'pie',
-        data: {
-            labels: data.map(d => d.ticker + ' ' + d.win_rate + '%'),
-            datasets: [{
-                data: data.map(d => d.win_rate),
-                backgroundColor: pieColors.slice(0, data.length),
-                borderColor: '#0d1117',
-                borderWidth: 2,
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    position: 'right',
-                    labels: {
-                        color: '#e6edf3',
-                        font: { size: 12, family: "'SF Mono', monospace" },
-                        padding: 12,
-                        usePointStyle: true,
-                        pointStyle: 'circle',
-                    }
-                },
-                tooltip: {
-                    callbacks: {
-                        label: function(ctx) {
-                            const d = data[ctx.dataIndex];
-                            return d.ticker + ': ' + d.win_rate + '% win (' + d.trades + ' trades)';
-                        }
-                    }
-                }
-            }
+    fetch('/api/guru/signals?' + params.toString()).then(r => r.json()).then(data => {
+        const tbody = document.getElementById('guru-signals-body');
+        if (!data.signals || data.signals.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-secondary);padding:2rem;">No guru signals</td></tr>';
+        } else {
+            tbody.innerHTML = data.signals.map(s => {
+                const time = s.signal_time ? s.signal_time.substring(5, 16) : '';
+                const srcClass = s.source === 'telegram' ? 'badge-blue' : 'badge-purple';
+                return '<tr>' +
+                    '<td style="white-space:nowrap;">' + time + '</td>' +
+                    '<td><span class="badge ' + srcClass + '">' + s.source + '</span></td>' +
+                    '<td><strong>' + s.ticker + '</strong></td>' +
+                    '<td>' + actionBadge(s.action) + '</td>' +
+                    '<td>' + (s.strike ? Math.round(s.strike) : '—') + '</td>' +
+                    '<td>' + (s.right || '—') + '</td>' +
+                    '<td>' + (s.entry_price ? '$' + s.entry_price.toFixed(2) : '—') + '</td>' +
+                    '<td>' + (s.we_executed ? '<span class="badge badge-green">Yes</span>' : '<span class="badge badge-red">No</span>') + '</td>' +
+                    '<td>' + outcomeBadge(s.our_outcome) + '</td>' +
+                    '<td style="font-size:0.78rem;color:var(--text-secondary);">' + (s.our_reject_reason || '') + '</td></tr>';
+            }).join('');
         }
+        const pag = document.getElementById('guru-signals-pagination');
+        if (data.total_pages <= 1) { pag.innerHTML = ''; return; }
+        let html = '';
+        if (data.page > 1) html += pgBtn(data.page - 1, '&laquo; Prev');
+        for (let p = 1; p <= data.total_pages; p++) {
+            if (p === data.page) html += '<span style="padding:4px 10px;border:1px solid var(--accent);border-radius:4px;color:var(--accent);font-size:0.8rem;font-weight:600;">' + p + '</span>';
+            else if (p <= 3 || p >= data.total_pages - 1 || Math.abs(p - data.page) <= 1) html += pgBtn(p, p);
+            else if (p === 4 || p === data.total_pages - 2) html += '<span style="color:var(--text-muted);font-size:0.8rem;">...</span>';
+        }
+        if (data.page < data.total_pages) html += pgBtn(data.page + 1, 'Next &raquo;');
+        pag.innerHTML = html;
     });
 }
-
-const guruPie = {{ guru_pie | tojson }};
-const botPie = {{ bot_pie | tojson }};
-buildPieChart('guruPieChart', guruPie);
-buildPieChart('botPieChart', botPie);
+function pgBtn(page, label) {
+    return '<a href="#guru-signals-section" onclick="loadGuruSignals(' + page + ');return false;" style="padding:4px 10px;border:1px solid var(--border);border-radius:4px;color:var(--text-secondary);text-decoration:none;font-size:0.8rem;cursor:pointer;">' + label + '</a>';
+}
+loadGuruSignals(1);
 </script>
-{% endif %}
 {% endblock %}
