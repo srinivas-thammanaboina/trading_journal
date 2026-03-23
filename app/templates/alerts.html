@@ -330,7 +330,13 @@ function showExecDetail(alertId) {
             if (a.strike) html += a.strike + (a.right || '') + ' ';
             if (a.entry_price) html += '@ $' + parseFloat(a.entry_price).toFixed(2) + ' ';
             html += '<span class="badge ' + (a.outcome === 'filled' ? 'badge-green' : a.outcome === 'failed' ? 'badge-red' : 'badge-yellow') + '">' + (a.outcome || '?') + '</span>';
-            html += '</div></div>';
+            html += '</div>';
+            // Show execution error if available
+            if (a.outcome === 'failed' && a.risk_reason && a.risk_reason !== 'Approved') {
+                html += '<div style="margin-top:0.35rem;font-size:0.75rem;color:#e74c3c;background:rgba(231,76,60,0.08);padding:0.35rem 0.5rem;border-radius:4px;border:1px solid rgba(231,76,60,0.2);">' +
+                    a.risk_reason.replace(/</g,'&lt;') + '</div>';
+            }
+            html += '</div>';
 
             // Orders
             if (data.orders.length === 0) {
