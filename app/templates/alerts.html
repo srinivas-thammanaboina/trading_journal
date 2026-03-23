@@ -251,11 +251,13 @@ function loadAlertAudit(page) {
                         }
                     }
 
-                    // Outcome badge
+                    // Outcome badge — clickable for filled/failed/no_position
                     let outcome = '<span class="badge badge-muted">' + (a.outcome || '?') + '</span>';
-                    if (a.outcome === 'filled') outcome = '<span class="badge badge-green">filled</span>';
-                    else if (a.outcome === 'failed') outcome = '<span class="badge badge-red">failed</span>';
-                    else if (a.outcome === 'no_position') outcome = '<span class="badge badge-yellow">no position</span>';
+                    const clickable = ['filled', 'failed', 'no_position'].includes(a.outcome);
+                    const clickAttr = clickable ? ' style="cursor:pointer;text-decoration:underline dotted;" onclick="showExecDetail(' + a.id + ')" title="Click for execution detail"' : '';
+                    if (a.outcome === 'filled') outcome = '<span class="badge badge-green"' + clickAttr + '>filled</span>';
+                    else if (a.outcome === 'failed') outcome = '<span class="badge badge-red"' + clickAttr + '>failed</span>';
+                    else if (a.outcome === 'no_position') outcome = '<span class="badge badge-yellow"' + clickAttr + '>no position</span>';
                     else if (a.outcome === 'rejected') outcome = '<span class="badge badge-red">rejected</span>';
                     else if (a.outcome === 'duplicate') outcome = '<span class="badge badge-yellow">dup</span>';
                     else if (a.outcome === 'ignored') outcome = '<span class="badge badge-muted">ignored</span>';
@@ -299,6 +301,88 @@ function aPgBtn(page, label) {
 }
 
 loadAlertAudit(1);
+
+// Execution detail modal
+function showExecDetail(alertId) {
+    const modal = document.getElementById('execDetailModal');
+    const body = document.getElementById('execDetailBody');
+    body.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text-muted);">Loading...</div>';
+    modal.style.display = 'flex';
+
+    fetch('/api/alerts/' + alertId + '/execution-detail')
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                body.innerHTML = '<div style="padding:1rem;color:var(--red);">' + data.error + '</div>';
+                return;
+            }
+
+            let html = '';
+
+            // Alert summary
+            const a = data.alert;
+            html += '<div style="margin-bottom:1rem;padding:0.75rem;background:var(--bg-primary);border-radius:6px;">';
+            html += '<div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:0.25rem;">Alert</div>';
+            html += '<div style="font-size:0.85rem;color:var(--text-secondary);">' + (a.raw_text || '').substring(0, 150).replace(/</g,'&lt;') + '</div>';
+            html += '<div style="margin-top:0.35rem;font-size:0.78rem;">';
+            if (a.ticker) html += '<strong>' + a.ticker + '</strong> ';
+            if (a.action) html += '<span class="badge ' + (a.action === 'BUY' ? 'badge-green' : 'badge-red') + '">' + a.action + '</span> ';
+            if (a.strike) html += a.strike + (a.right || '') + ' ';
+            if (a.entry_price) html += '@ $' + parseFloat(a.entry_price).toFixed(2) + ' ';
+            html += '<span class="badge ' + (a.outcome === 'filled' ? 'badge-green' : a.outcome === 'failed' ? 'badge-red' : 'badge-yellow') + '">' + (a.outcome || '?') + '</span>';
+            html += '</div></div>';
+
+            // Orders
+            if (data.orders.length === 0) {
+                html += '<div style="padding:1rem;color:var(--text-muted);text-align:center;">No orders recorded for this alert</div>';
+            } else {
+                data.orders.forEach(function(o) {
+                    html += '<div style="margin-bottom:0.75rem;padding:0.6rem 0.75rem;background:var(--bg-primary);border-radius:6px;border-left:3px solid ' +
+                        (o.status === 'filled' ? 'var(--green)' : o.status === 'failed' ? 'var(--red)' : '#f39c12') + ';">';
+                    html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+                    html += '<span style="font-size:0.8rem;font-weight:600;">' + (o.order_action || '') + ' ' + (o.order_type || '') + ' ' + (o.contracts || '') + 'x ' + (o.contract_symbol || '') + '</span>';
+                    html += '<span class="badge ' + (o.status === 'filled' ? 'badge-green' : o.status === 'failed' ? 'badge-red' : 'badge-yellow') + '">' + (o.status || '?') + '</span>';
+                    html += '</div>';
+                    html += '<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.25rem;">';
+                    if (o.signal_price) html += 'Signal: $' + parseFloat(o.signal_price).toFixed(2) + ' · ';
+                    if (o.limit_price) html += 'Limit: $' + parseFloat(o.limit_price).toFixed(2) + ' · ';
+                    if (o.fill_price) html += 'Fill: $' + parseFloat(o.fill_price).toFixed(2) + ' · ';
+                    if (o.total_latency_ms) html += 'Total: ' + o.total_latency_ms + 'ms';
+                    html += '</div></div>';
+                });
+            }
+
+            // Events timeline
+            if (data.events.length > 0) {
+                html += '<div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-muted);margin:0.75rem 0 0.35rem;letter-spacing:0.05em;">Execution Timeline</div>';
+                data.events.forEach(function(e) {
+                    const evtColors = {
+                        'submitted': '#3498db', 'acked': '#2ecc71', 'filled': '#2ecc71',
+                        'timeout': '#f39c12', 'cancelled': '#f39c12', 'escalated': '#f39c12',
+                        'retry': '#3498db', 'retry_failed': '#e74c3c',
+                        'rejected': '#e74c3c', 'failed': '#e74c3c',
+                        'no_position': '#f1c40f', 'late_fill_detected': '#bc8cff',
+                    };
+                    const color = evtColors[e.event_type] || 'var(--text-muted)';
+                    const time = e.event_time ? e.event_time.substring(11, 19) : '';
+                    html += '<div style="display:flex;gap:0.5rem;align-items:flex-start;padding:0.3rem 0;border-bottom:1px solid var(--border);">';
+                    html += '<span style="font-size:0.7rem;font-family:var(--font-mono);color:var(--text-muted);min-width:55px;">' + time + '</span>';
+                    html += '<span style="font-size:0.7rem;font-weight:700;color:' + color + ';min-width:80px;text-transform:uppercase;">' + e.event_type + '</span>';
+                    html += '<span style="font-size:0.72rem;color:var(--text-secondary);flex:1;">' + (e.metadata || '') + (e.price ? ' @ $' + parseFloat(e.price).toFixed(2) : '') + '</span>';
+                    html += '</div>';
+                });
+            }
+
+            body.innerHTML = html;
+        })
+        .catch(err => {
+            body.innerHTML = '<div style="padding:1rem;color:var(--red);">Error: ' + err.message + '</div>';
+        });
+}
+
+function closeExecModal() {
+    document.getElementById('execDetailModal').style.display = 'none';
+}
 
 // Parser latency chart — per-day sections with true time axis
 {% if parser_chart_data %}
@@ -445,4 +529,16 @@ loadAlertAudit(1);
 })();
 {% endif %}
 </script>
+
+<!-- Execution Detail Modal -->
+<div id="execDetailModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); z-index:1000; justify-content:center; align-items:center;"
+     onclick="if(event.target===this)closeExecModal()">
+    <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:12px; width:600px; max-width:90vw; max-height:80vh; overflow-y:auto; padding:1.25rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+            <div style="font-weight:600; font-size:1rem;">Execution Detail</div>
+            <span onclick="closeExecModal()" style="cursor:pointer; font-size:1.2rem; color:var(--text-muted); padding:0.25rem;">&times;</span>
+        </div>
+        <div id="execDetailBody"></div>
+    </div>
+</div>
 {% endblock %}

@@ -44,3 +44,52 @@ async def get_alerts(
     rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
 
     return {"alerts": rows, "page": page, "total_pages": total_pages, "total": total}
+
+
+@router.get("/alerts/{alert_id}/execution-detail")
+async def get_execution_detail(alert_id: int):
+    """Get full execution timeline for an alert — orders + order_events."""
+    conn = get_db()
+
+    # Get the alert
+    alert = conn.execute("SELECT * FROM alerts WHERE id = ?", (alert_id,)).fetchone()
+    if not alert:
+        return {"error": "Alert not found"}
+    alert_dict = dict(alert)
+
+    # Find orders linked to this alert via signal_id
+    signal_id = alert_dict.get("signal_id")
+    orders = []
+    events = []
+
+    if signal_id:
+        order_rows = conn.execute(
+            """SELECT id, order_time, ticker, contract_symbol, order_type, order_action,
+                      order_purpose, contracts, limit_price, ibkr_order_id, status,
+                      fill_price, filled_at, submit_started_at, ack_received_at,
+                      first_fill_at, escalated, total_latency_ms, signal_price,
+                      reference_bid, reference_ask, reference_mid
+               FROM orders WHERE signal_id = ? ORDER BY order_time""",
+            (signal_id,)
+        ).fetchall()
+        orders = [dict(r) for r in order_rows]
+
+        # Get all order_events for these orders
+        order_ids = [o["id"] for o in orders]
+        if order_ids:
+            placeholders = ",".join("?" * len(order_ids))
+            event_rows = conn.execute(
+                f"""SELECT oe.id, oe.order_id, oe.event_type, oe.event_time,
+                           oe.price, oe.contracts, oe.metadata
+                    FROM order_events oe
+                    WHERE oe.order_id IN ({placeholders})
+                    ORDER BY oe.event_time""",
+                order_ids
+            ).fetchall()
+            events = [dict(r) for r in event_rows]
+
+    return {
+        "alert": alert_dict,
+        "orders": orders,
+        "events": events,
+    }
