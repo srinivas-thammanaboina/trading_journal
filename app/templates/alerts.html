@@ -254,6 +254,8 @@ function loadAlertAudit(page) {
                     // Outcome badge
                     let outcome = '<span class="badge badge-muted">' + (a.outcome || '?') + '</span>';
                     if (a.outcome === 'filled') outcome = '<span class="badge badge-green">filled</span>';
+                    else if (a.outcome === 'failed') outcome = '<span class="badge badge-red">failed</span>';
+                    else if (a.outcome === 'no_position') outcome = '<span class="badge badge-yellow">no position</span>';
                     else if (a.outcome === 'rejected') outcome = '<span class="badge badge-red">rejected</span>';
                     else if (a.outcome === 'duplicate') outcome = '<span class="badge badge-yellow">dup</span>';
                     else if (a.outcome === 'ignored') outcome = '<span class="badge badge-muted">ignored</span>';

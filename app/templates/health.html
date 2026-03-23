@@ -14,7 +14,7 @@
 </div>
 
 <!-- ═══ ROW 1: Six Summary Cards ═══ -->
-<div style="display:grid; grid-template-columns:repeat(6, 1fr); gap:0.75rem; margin-bottom:1rem;">
+<div class="grid-6">
     <!-- Trading Status -->
     <div class="card" style="border-left:3px solid {{ 'var(--green)' if trading_status_color == 'green' else 'var(--red)' if trading_status_color == 'red' else '#f39c12' }}; padding:0.75rem 1rem;">
         <div style="font-size:0.65rem; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-muted); margin-bottom:0.4rem;">Trading Status</div>
@@ -79,7 +79,7 @@
 </div>
 
 <!-- ═══ ROW 2: Entry Gate Result + Bot Health ═══ -->
-<div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1rem;">
+<div class="grid-2">
     <!-- Entry Gate Result -->
     <div class="card" style="padding:1rem 1.25rem;">
         <div style="font-weight:600; font-size:1rem; margin-bottom:0.15rem;">Entry Gate Result</div>
@@ -180,7 +180,7 @@
 {% endif %}
 
 <!-- ═══ ROW 4: Open Positions Risk Table + Recent Risk Events ═══ -->
-<div style="display:grid; grid-template-columns:3fr 2fr; gap:1rem; margin-bottom:1.5rem;">
+<div class="grid-2-3">
     <!-- Open Positions Risk Table -->
     <div class="card" style="padding:1rem 1.25rem;">
         <div style="font-weight:600; font-size:1rem; margin-bottom:0.15rem;">Open Positions Risk Table</div>

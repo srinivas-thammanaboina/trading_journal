@@ -159,7 +159,7 @@ body {
     flex: 1;
     margin-left: var(--sidebar-width);
     padding: 2rem 2.5rem;
-    max-width: 1400px;
+    min-width: 0; /* prevent overflow */
 }
 
 /* ── Page header ──────────────────────────────────── */
@@ -996,8 +996,30 @@ tbody tr:hover { background: rgba(88, 166, 255, 0.03); }
     white-space: nowrap;
 }
 
+/* ── Responsive grid utility classes ──────────────── */
+.grid-6 { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.75rem; margin-bottom: 1rem; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1rem; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+.grid-2-3 { display: grid; grid-template-columns: 3fr 2fr; gap: 1rem; margin-bottom: 1.5rem; }
+
 /* ── Responsive ───────────────────────────────────── */
+
+/* Large screens — widen content area */
+@media (min-width: 1600px) {
+    .main-content { max-width: 1600px; }
+}
+
+/* Medium screens (tablets, small laptops) */
+@media (max-width: 1200px) {
+    .grid-6 { grid-template-columns: repeat(3, 1fr) !important; }
+    .grid-3 { grid-template-columns: 1fr 1fr !important; }
+    .main-content { padding: 1.5rem 1.5rem; }
+    .bm-top-row { grid-template-columns: 1fr 1fr !important; }
+}
+
+/* Small screens */
 @media (max-width: 900px) {
+    :root { --sidebar-width: 60px; }
     .sidebar { width: 60px; }
     .sidebar-logo, .sidebar-footer .mode-badge, .logo-sub { display: none; }
     .nav-item { padding: 0.6rem; font-size: 0.7rem; text-align: center; }
@@ -1006,4 +1028,13 @@ tbody tr:hover { background: rgba(88, 166, 255, 0.03); }
     .two-col, .three-col { grid-template-columns: 1fr; }
     .pipeline { flex-wrap: wrap; }
     .bm-top-row, .bm-mid-row, .bm-bot-row { grid-template-columns: 1fr; }
+    .grid-6 { grid-template-columns: repeat(2, 1fr) !important; }
+    .grid-3 { grid-template-columns: 1fr !important; }
+    .grid-2, .grid-2-3 { grid-template-columns: 1fr !important; }
+}
+
+/* Very small */
+@media (max-width: 640px) {
+    .grid-6 { grid-template-columns: 1fr !important; }
+    .main-content { padding: 0.75rem; }
 }

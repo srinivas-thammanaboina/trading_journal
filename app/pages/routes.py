@@ -647,7 +647,13 @@ async def guru_page(request: Request):
     from datetime import datetime
     import pytz
     now_et = datetime.now(tz=pytz.timezone("America/New_York"))
-    is_market_hours = 5 <= now_et.weekday() < 5 and now_et.hour >= 9
+    is_market_hours = 0 <= now_et.weekday() < 5 and 9 <= now_et.hour < 16
+
+    # Default to today if no dates provided
+    if not filter_start and not filter_end:
+        today = now_et.strftime("%Y-%m-%d")
+        filter_start = today
+        filter_end = today
 
     # Available tickers for filter
     try:
