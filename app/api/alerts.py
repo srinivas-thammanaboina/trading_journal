@@ -43,6 +43,18 @@ async def get_alerts(
     sql += f" ORDER BY alert_time DESC LIMIT {per_page} OFFSET {offset}"
     rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
 
+    # Fix stale outcomes: SELL/CLOSE marked "filled" but no order exists = "no_position"
+    for row in rows:
+        if row.get("outcome") == "filled" and row.get("action") in ("SELL", "CLOSE", "PARTIAL_CLOSE"):
+            sig_id = row.get("signal_id")
+            if sig_id:
+                has_order = conn.execute(
+                    "SELECT COUNT(*) as cnt FROM orders WHERE signal_id = ? AND status = 'filled'",
+                    (sig_id,)
+                ).fetchone()["cnt"]
+                if has_order == 0:
+                    row["outcome"] = "no_position"
+
     return {"alerts": rows, "page": page, "total_pages": total_pages, "total": total}
 
 
@@ -88,8 +100,36 @@ async def get_execution_detail(alert_id: int):
             ).fetchall()
             events = [dict(r) for r in event_rows]
 
+    # For orders without detailed events, infer a summary from order data
+    inferred_summary = None
+    if orders and not any(e.get("metadata") for e in events):
+        o = orders[0]
+        parts = []
+        if o.get("status") == "failed":
+            latency = o.get("total_latency_ms")
+            if latency:
+                parts.append(f"Order failed after {latency}ms ({latency/1000:.1f}s)")
+            if o.get("escalated"):
+                parts.append("Escalated to market order but still did not fill")
+            if not parts:
+                parts.append("Order failed — no fill received from IBKR")
+            # Check if it was a market data issue (common on paper)
+            if latency and latency > 30000:
+                parts.append("Likely cause: no market data subscription on paper account (Error 354)")
+        elif o.get("status") == "filled":
+            parts.append(f"Filled at ${o['fill_price']:.2f}" if o.get("fill_price") else "Filled")
+            if o.get("total_latency_ms"):
+                parts.append(f"Total execution time: {o['total_latency_ms']}ms")
+        inferred_summary = " | ".join(parts) if parts else None
+
+    # For SELL/CLOSE with no orders — explain why
+    if not orders and alert_dict.get("action") in ("SELL", "CLOSE", "PARTIAL_CLOSE"):
+        if alert_dict.get("outcome") in ("filled", "no_position"):
+            inferred_summary = "No matching open position found — sell signal had nothing to close"
+
     return {
         "alert": alert_dict,
         "orders": orders,
         "events": events,
+        "inferred_summary": inferred_summary,
     }

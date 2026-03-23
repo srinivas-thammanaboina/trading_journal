@@ -345,11 +345,18 @@ function showExecDetail(alertId) {
                     html += '</div>';
                     html += '<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.25rem;">';
                     if (o.signal_price) html += 'Signal: $' + parseFloat(o.signal_price).toFixed(2) + ' · ';
-                    if (o.limit_price) html += 'Limit: $' + parseFloat(o.limit_price).toFixed(2) + ' · ';
+                    if (o.limit_price && o.limit_price < 1e6) html += 'Limit: $' + parseFloat(o.limit_price).toFixed(2) + ' · ';
                     if (o.fill_price) html += 'Fill: $' + parseFloat(o.fill_price).toFixed(2) + ' · ';
-                    if (o.total_latency_ms) html += 'Total: ' + o.total_latency_ms + 'ms';
+                    if (o.total_latency_ms) html += 'Total: ' + (o.total_latency_ms / 1000).toFixed(1) + 's';
                     html += '</div></div>';
                 });
+            }
+
+            // Inferred summary (for orders without detailed event metadata)
+            if (data.inferred_summary) {
+                html += '<div style="margin:0.5rem 0;padding:0.5rem 0.75rem;border-radius:6px;font-size:0.78rem;' +
+                    'background:rgba(243,156,18,0.08);border:1px solid rgba(243,156,18,0.2);color:#f39c12;">' +
+                    data.inferred_summary + '</div>';
             }
 
             // Events timeline
